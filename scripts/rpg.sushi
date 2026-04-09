@@ -1,0 +1,101 @@
+use math
+use io
+
+class Region [] do
+    field tiles
+    
+    fun init do
+        set self.tiles [array 64 64]
+    end
+end
+
+class World [] do
+    field regions
+    
+    fun init do
+        set self.regions [array 64 64]
+    end
+    
+    ;; Get the region of a global position
+    fun global-to-region [x y] do
+    end
+end
+
+class Entity [] do
+    field x y
+    fun init [[x 0] [y 0]] do
+        set self.x [eval x]
+        set self.y [eval y]
+    end
+end
+
+class Player [Entity] do
+    fun init do
+        init 0 0
+    end
+    fun x= [[x 0]] do
+        set self.x [eval x]
+    end
+    fun y= [[y 0]] do
+        set self.y [eval y]
+    end
+    fun x+= [[x 0]] do
+        set self.x ([eval x] + self.x)
+    end
+    fun x-= [[x 0]] do
+        self.x+= -x
+    end
+    fun y+= [[y 0]] do
+        set self.y ([eval y] + self.y)
+    end
+    fun y-= [[y 0]] do
+        self.y+= -y
+    end
+    fun pos= [[x 0] [y 0]] do
+        self.x= x
+        self.y= y
+    end
+end
+
+class EntityManager [] do
+
+end
+
+fun start [] do 
+    var running T
+    var player [new Player]
+    player.pos= 10 10  
+    
+    write-line player
+    
+    io.set-cursor-visible F
+    io.clear
+    
+    fun draw [] do
+        io.clear
+        io.set-cursor player.x player.y
+        io.set-fg "Yellow"
+        io.write "@"
+    end
+    
+    draw
+    
+    while running do
+        var ch [io.getch]
+        cond do
+            (ch eq "w"): [player.y-= 1]
+            (ch eq "s"): [player.y+= 1]
+            (ch eq "a"): [player.x-= 1]
+            (ch eq "d"): [player.x+= 1]
+            (ch eq "q"): do
+                set running F
+            end
+        end
+    
+        draw 
+    end
+    
+    io.set-cursor-visible T
+end
+
+start

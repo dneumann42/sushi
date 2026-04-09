@@ -1,0 +1,31 @@
+use prose global
+
+var loop-count 10
+while (loop-count > 0) do
+    set loop-count (loop-count - 1)
+end
+
+fun has-heart [person] do
+    T
+end
+
+dialogue hello do
+    start-verse start
+    
+    verse start "Hello, world! my name is \(name a)" do
+        if [has-heart b] do
+            resp "Hi there, I love you." love
+        end
+        resp "Hi there, I hate you." hate
+    end
+    
+    verse love "Aww shucks man" done
+    
+    verse hate "Really?" do
+        resp "No... i'm teasing" love
+        resp "Yep." done
+    end
+end
+
+var new-dialog [dialogues.(hello).execute]
+write-line new-dialog

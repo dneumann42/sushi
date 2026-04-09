@@ -1,0 +1,40 @@
+;; Sushi from sushi
+;; Can we implement sushi in sushi?
+
+use math
+use base
+
+class SourceLocation [] do
+    field file offset line column
+end
+
+class SourceFile [] do
+    field line-starts name text
+    
+    fun init [n t] do
+        set self.name n
+        set self.text t
+        set self.line-starts #[]
+    end
+    
+    fun length [] do
+        length self.text
+    end
+    
+    fun line-count [] do
+        length self.line-starts  
+    end
+    
+    fun get-location [offset] do
+        var clamped-offset [math.clamp offset 0 self.length]
+        var line-index [base.binary-search self.line-starts clamped-offset]
+;         eval clamped-offset
+    end
+end
+  
+class Reader [] do
+end
+
+var s [new SourceFile "test" "hello"]
+write-line [s.get-location 0]
+

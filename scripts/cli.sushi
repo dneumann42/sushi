@@ -1,0 +1,17 @@
+if (argv eq 0) do
+    use repl
+    0
+end do
+    if (((argc at 0) eq "-r") or ((argc at 0) eq "--run")) do
+        if (argv eq 2) do
+            run-file (argc at 1)
+            0
+        end do
+            write-line "Usage: sushi --run <path>"
+            1
+        end
+    end do
+        write-line "Usage: sushi [--run <path>]"
+        1
+    end
+end

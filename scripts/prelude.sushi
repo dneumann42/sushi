@@ -1,0 +1,49 @@
+fun echo [str] do
+    write-line str
+end
+
+fun each [item iterator body] do
+    iterate item iterator body
+end
+
+fun for [item start stop body] do
+    var current [eval-value start]
+    var end-value [eval-value stop]
+    var descending (current > end-value)
+    var finished F
+
+    fun next do
+        cond do
+            finished: :done
+            T: do
+                var value current
+
+                cond do
+                    (current eq end-value): do
+                        set finished T
+                    end
+                    descending: do
+                        set current (current - 1)
+                    end
+                    T: do
+                        set current (current + 1)
+                    end
+                end
+
+                eval-value value
+            end
+        end
+    end
+
+    iterate item [eval next] body
+end
+
+fun do-times [n blk] do
+    var do-times-count [eval-value n]
+    var do-times-index 0
+    while (do-times-index < do-times-count) do
+        var it [eval-value do-times-index]
+        replay blk
+        set do-times-index (do-times-index + 1)
+    end
+end

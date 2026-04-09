@@ -1,0 +1,97 @@
+var dialogues {}
+
+class Response [] do
+    field text next-verse-id
+
+    fun init [text next-verse-id] do
+        set self.text text
+        set self.next-verse-id next-verse-id
+    end
+end
+
+class Verse [] do
+    field id text next-verse-id responses body
+
+    fun init [id text] do
+        set self.id id
+        set self.text text
+        set self.next-verse-id ""
+        set self.responses #[]
+        set self.body F
+    end
+
+    fun add-response [response] do
+        append self.responses response
+    end
+
+    fun execute do
+        var resolved [new Verse self.id self.text]
+        set [eval resolved].next-verse-id self.next-verse-id
+
+        if self.body do
+            set [eval resolved].next-verse-id ""
+
+            fun resp [text next] do
+                [eval resolved].add-response [new Response text next]
+            end
+
+            replay self.body
+        end
+
+        eval resolved
+    end
+end
+
+class Dialogue [] do
+    field dialog-id verses starting-verse-id
+    fun init [id] do
+        set self.dialog-id id
+        set self.verses {}
+    end
+
+    fun add-verse [verse] do
+        set self.verses.(verse.id) verse
+    end
+
+    fun execute do
+        var resolved [new Dialogue self.dialog-id]
+        set [eval resolved].starting-verse-id self.starting-verse-id
+
+        iterate verse [table-values self.verses] do
+            [eval resolved].add-verse [verse.execute]
+        end
+
+        eval resolved
+    end
+end
+
+fun dialogue [dialog-id blk] do
+    var d [new Dialogue dialog-id]
+
+    fun name [who] do
+        cond do
+            (who eq a): "Player"
+            (who eq b): "Philbert"
+            T: [error "Unknown speaker"]
+        end
+    end
+
+    fun verse [verse-id text next-or-blk] do
+        var v [new Verse verse-id text]
+        d.add-verse v
+
+        if [is-block next-or-blk] do
+            set v.body [capture next-or-blk]
+        end do
+            set v.next-verse-id next-or-blk
+        end
+    end
+    
+    fun start-verse [v-id] do
+        set d.starting-verse-id v-id
+    end
+
+    replay blk
+
+    set dialogues.(dialog-id) d
+end

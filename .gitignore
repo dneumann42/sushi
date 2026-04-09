@@ -1,0 +1,13 @@
+nimble.develop
+nimble.paths
+nimbledeps
+nimcache/
+nimcache-*/
+.nimcache/
+
+/sushi
+/src/*.out
+/tests/test_runtime
+
+.nide-debug.log
+.nide.json

@@ -1,0 +1,102 @@
+use io
+
+class HistoryNode [] do
+    field line next
+end
+
+class History [] do
+    field head count pending-line walk-node walk-index
+
+    fun init do
+        set self.head F
+        set self.count 0
+        set self.pending-line ""
+        set self.walk-node F
+        set self.walk-index 0
+        self
+    end
+
+    fun add-current do
+        var node [new HistoryNode]
+        set node.line self.pending-line
+        set node.next self.head
+        set self.head node
+        set self.count (self.count + 1)
+        self.count
+    end
+
+    fun print do
+        if (self.count eq 0) do
+            write-line "history is empty"
+        end do
+            set self.walk-node self.head
+            set self.walk-index self.count
+            self.print-current
+        end
+    end
+
+    fun print-current do
+        if (self.walk-node eq F) do
+            self
+        end do
+            write-line self.walk-index
+            write-line self.walk-node.line
+            set self.walk-node self.walk-node.next
+            set self.walk-index (self.walk-index - 1)
+            self.print-current
+        end
+    end
+end
+
+class Repl [] do
+    field history current-line
+
+    fun init do
+        set self.history [new History]
+        set self.current-line ""
+        self
+    end
+
+    fun banner do
+        write-line "Sushi REPL 🍣"
+        write-line "Type :history to inspect command history."
+        write-line "Type :load <script> to load a script and :quit to exit."
+        self
+    end
+
+    fun loop do
+        io.set-fg "Green"
+        write "> "
+        let line [read-line] do
+            cond do
+                (line eq ":quit"): do
+                    write-line "bye"
+                end
+                T: do
+                   set self.current-line [eval line]
+                   self.handle
+                   self.loop
+               end
+            end
+        end
+    end
+
+    fun handle do
+        set self.history.pending-line self.current-line
+        self.history.add-current
+        io.set-fg "White"
+        if (self.current-line eq ":history") do
+            self.history.print
+        end do
+            write-line [run self.current-line]
+        end
+    end
+    
+    fun run do
+        repl.banner
+        repl.loop
+    end
+end
+
+var repl [new Repl]
+repl.run
