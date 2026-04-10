@@ -1351,8 +1351,6 @@ proc bindNativeCommands(env: Env) =
     ("not", notCommand),
     ("and", andCommand),
     ("or", orCommand),
-    ("write", writeCommand),
-    ("write-line", writeLineCommand),
     ("read-line", readLineCommand),
     ("error", errorCommand),
     ("error-at", errorAtCommand),

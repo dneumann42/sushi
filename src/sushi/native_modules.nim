@@ -1,4 +1,4 @@
-import std/[colors, math, sequtils, strutils, tables, terminal, rdstdin]
+import std/[colors, math, sequtils, strutils, tables, terminal, rdstdin, sugar]
 when not defined(windows):
   import std/[posix, termios]
 import diagnostics
@@ -275,38 +275,43 @@ proc readKeySequence(): Value =
 proc buildIoModule*(): NativeModuleDefinition =
   var builder = initNativeModuleBuilder("io")
   discard builder.command("write", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
-    let value = evaluator.evaluateQuoted(args[0], env)
-    stdout.write(render(value))
-    value)
+    for arg in args:
+      result =  evaluator.evaluateQuoted(arg, env)
+      stdout.write(render(result)))
+
   discard builder.command("write-line", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     if args.len == 0:
       echo ""
       return newText("")
-    let value = evaluator.evaluateQuoted(args[0], env)
-    echo render(value)
-    value)
+    for arg in args:
+      result = evaluator.evaluateQuoted(arg, env)
+      echo render(result))
+
   discard builder.command("write-error", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
-    let value = evaluator.evaluateQuoted(args[0], env)
-    stderr.write(render(value))
-    value)
+    result = evaluator.evaluateQuoted(args[0], env)
+    stderr.write(render(result)))
+
   discard builder.command("write-error-line", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     if args.len == 0:
       stderr.writeLine("")
       return newText("")
-    let value = evaluator.evaluateQuoted(args[0], env)
-    stderr.writeLine(render(value))
-    value)
+    for arg in args:
+      result = evaluator.evaluateQuoted(arg, env)
+      stderr.writeLine(render(result)))
+
   discard builder.command("concat", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     var buffer = ""
     for arg in args:
       buffer.add(requireText(evaluator.evaluateQuoted(arg, env), "concat"))
     newText(buffer))
+
   discard builder.command("repeat", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let text = requireText(evaluator.evaluateQuoted(args[0], env), "repeat")
     let count = requireInteger(evaluator.evaluateQuoted(args[1], env), "repeat")
     if count < 0:
       raise newException(ValueError, "'repeat' expects a non-negative count.")
     newText(strutils.repeat(text, count)))
+
   discard builder.command("contains", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let text = requireText(evaluator.evaluateQuoted(args[0], env), "contains")
     let needle = requireText(evaluator.evaluateQuoted(args[1], env), "contains")
@@ -319,14 +324,17 @@ proc buildIoModule*(): NativeModuleDefinition =
       newText(readLineFromStdin(""))
     except EOFError:
       newBoolean(false))
+
   discard builder.command("read-file", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let path = requireText(evaluator.evaluateQuoted(args[0], env), "read-file")
     newText(readFile(path)))
+
   discard builder.command("write-file", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let path = requireText(evaluator.evaluateQuoted(args[0], env), "write-file")
     let text = requireText(evaluator.evaluateQuoted(args[1], env), "write-file")
     writeFile(path, text)
     newBoolean(true))
+
   discard builder.command("clear", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     discard evaluator
     discard env
@@ -334,34 +342,41 @@ proc buildIoModule*(): NativeModuleDefinition =
     stdout.eraseScreen()
     stdout.setCursorPos(0, 0)
     newBoolean(true))
+
   discard builder.command("width", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     discard evaluator
     discard env
     discard args
     newInteger(terminalWidth()))
+
   discard builder.command("height", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     discard evaluator
     discard env
     discard args
     newInteger(terminalHeight()))
+
   discard builder.command("getch", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     discard evaluator
     discard env
     discard args
     newText($getch()))
+
   discard builder.command("read-key-sequence", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     discard evaluator
     discard env
     discard args
     readKeySequence())
+
   discard builder.command("char", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let code = requireInteger(evaluator.evaluateQuoted(args[0], env), "char")
     if code < 0 or code > 255:
       raise newException(ValueError, "'char' expects a byte value between 0 and 255.")
     newText($chr(code)))
+
   discard builder.command("drop-last", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let text = requireText(evaluator.evaluateQuoted(args[0], env), "drop-last")
     newText(dropLastByte(text)))
+
   discard builder.command("set-cursor-visible", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let visible = requireBoolean(evaluator.evaluateQuoted(args[0], env), "set-cursor-visible")
     if visible:
@@ -369,25 +384,30 @@ proc buildIoModule*(): NativeModuleDefinition =
     else:
       stdout.hideCursor()
     newBoolean(true))
+
   discard builder.command("set-cursor", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let x = requireInteger(evaluator.evaluateQuoted(args[0], env), "set-cursor")
     let y = requireInteger(evaluator.evaluateQuoted(args[1], env), "set-cursor")
     stdout.setCursorPos(x, y)
     newBoolean(true))
+
   discard builder.command("set-fg", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let colorName = requireText(evaluator.evaluateQuoted(args[0], env), "set-fg")
     stdout.setForegroundColor(parseColor(colorName))
     newBoolean(true))
+
   discard builder.command("set-bg", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let colorName = requireText(evaluator.evaluateQuoted(args[0], env), "set-bg")
     stdout.setBackgroundColor(parseColor(colorName))
     newBoolean(true))
+
   discard builder.command("reset-color", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     discard evaluator
     discard env
     discard args
     stdout.resetAttributes()
     newBoolean(true))
+
   builder.build
 
 proc buildSyntaxModule*(): NativeModuleDefinition =
@@ -403,6 +423,7 @@ proc buildSyntaxModule*(): NativeModuleDefinition =
     let ast = parseScript(source)
     let comments = scanComments(source)
     serializeNode(ast, comments))
+
   discard builder.command("field", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     if args.len != 2:
       raise newException(ValueError, "'field' expects a table and a text key.")
@@ -439,6 +460,7 @@ proc buildBaseModule*(): NativeModuleDefinition =
       else:
         hi = mid - 1
     newInteger(-(lo + 1)))
+
   discard builder.command("arity", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let arrayValue = evaluator.evaluateQuoted(args[0], env)
     if arrayValue.kind != Array:
@@ -463,6 +485,7 @@ proc buildMathModule*(): NativeModuleDefinition =
       newReal(clamp(a.realValue, b.realValue, c.realValue))
     else:
       raise newException(ValueError, "Expected number."))
+
   discard builder.command("mod", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let left = evaluator.evaluateQuoted(args[0], env)
     let right = evaluator.evaluateQuoted(args[1], env)

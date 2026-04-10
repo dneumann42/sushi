@@ -28,7 +28,7 @@ class History [] do
 
     fun print do
         if (self.count eq 0) do
-            write-line "history is empty"
+            io.write-line "history is empty"
         end do
             set self.walk-node self.head
             set self.walk-index self.count
@@ -40,8 +40,8 @@ class History [] do
         if (self.walk-node eq F) do
             self
         end do
-            write-line self.walk-index
-            write-line self.walk-node.line
+            io.write-line self.walk-index
+            io.write-line self.walk-node.line
             set self.walk-node self.walk-node.next
             set self.walk-index (self.walk-index - 1)
             self.print-current
@@ -59,9 +59,10 @@ class Repl [] do
     end
 
     fun banner do
-        write-line "Sushi REPL 🍣"
-        write-line "Type :history to inspect command history."
-        write-line "Type :load <script> to load a script and :quit to exit."
+        io.write-line "Sushi REPL 🍣"
+        io.write-line \
+          "Type :history to inspect command history." \
+          "Type :load <script> to load a script and :quit to exit."
         self
     end
 
@@ -71,14 +72,14 @@ class Repl [] do
 
     fun loop do
         io.set-fg "Green"
-        write "> "
+        io.write "> "
         let line [self.read-input] do
             cond do
                 (line eq F): do
-                    write-line "bye"
+                    io.write-line "bye"
                 end
                 (line eq ":quit"): do
-                    write-line "bye"
+                    io.write-line "bye"
                 end
                 T: do
                    set self.current-line [eval line]
@@ -96,7 +97,7 @@ class Repl [] do
         if (self.current-line eq ":history") do
             self.history.print
         end do
-            write-line [run self.current-line]
+            io.write-line [run self.current-line]
         end
     end
     
