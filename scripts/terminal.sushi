@@ -26,7 +26,7 @@ end
 
 fun parse-key [sequence] do
     cond do
-        (sequence eq F): [event "eof" "" F ""]
+        (sequence eq ""): [event "eof" "" F ""]
         (sequence eq "\r"): [event "enter" "" F sequence]
         (sequence eq "\n"): [event "enter" "" F sequence]
         (sequence eq [io.concat esc "[13;2u"]): [event "shift-enter" "" T sequence]

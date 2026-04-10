@@ -1,4 +1,4 @@
-import std/[colors, math, sequtils, strutils, tables, terminal]
+import std/[colors, math, sequtils, strutils, tables, terminal, rdstdin]
 when not defined(windows):
   import std/[posix, termios]
 import diagnostics
@@ -236,34 +236,41 @@ proc readKeySequence(): Value =
     newText($getch())
   else:
     let fd = stdin.getFileHandle()
-    var oldMode, rawMode, seqMode: Termios
-    discard fd.tcGetAttr(addr oldMode)
-    rawMode = oldMode
-    rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or INPCK or ISTRIP or IXON)
-    rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
-    rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
-    rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or IEXTEN or ISIG)
-    rawMode.c_cc[VMIN] = char(1)
-    rawMode.c_cc[VTIME] = char(0)
-    discard fd.tcSetAttr(TCSAFLUSH, addr rawMode)
-    try:
+    if fd.isatty() == 0:
       var ch: char
-      if readBuffer(stdin, addr ch, 1) <= 0:
-        return newBoolean(false)
-      var sequence = $ch
-      if ch == '\e':
-        seqMode = rawMode
-        seqMode.c_cc[VMIN] = char(0)
-        seqMode.c_cc[VTIME] = char(1)
-        discard fd.tcSetAttr(TCSANOW, addr seqMode)
+      if readBuffer(stdin, addr ch, 1) > 0:
+        newText($ch)
+      else:
+        newText("")
+    else:
+      var oldMode, rawMode: Termios
+      discard fd.tcGetAttr(addr oldMode)
+      rawMode = oldMode
+      rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or INPCK or ISTRIP or IXON)
+      rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
+      rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+      rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or IEXTEN or ISIG)
+      rawMode.c_cc[VMIN] = char(0)
+      rawMode.c_cc[VTIME] = char(1)
+      discard fd.tcSetAttr(TCSAFLUSH, addr rawMode)
+      try:
+        var ch: char
+        var sequence = ""
         while true:
           let count = readBuffer(stdin, addr ch, 1)
           if count <= 0:
             break
           sequence.add(ch)
-      newText(sequence)
-    finally:
-      discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
+          if ch != '\e' and (sequence.len == 1 or sequence[^1] != '\e'):
+            break
+          if sequence.len > 1 and sequence[0] == '\e' and not (count > 0 and (ch == '[' or (ch >= '0' and ch <= '9'))):
+            break
+        if sequence.len == 0:
+          newText("")
+        else:
+          newText(sequence)
+      finally:
+        discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
 
 proc buildIoModule*(): NativeModuleDefinition =
   var builder = initNativeModuleBuilder("io")
@@ -309,7 +316,7 @@ proc buildIoModule*(): NativeModuleDefinition =
     discard env
     discard args
     try:
-      newText(stdin.readLine())
+      newText(readLineFromStdin(""))
     except EOFError:
       newBoolean(false))
   discard builder.command("read-file", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =

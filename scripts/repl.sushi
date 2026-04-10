@@ -66,34 +66,7 @@ class Repl [] do
     end
 
     fun read-input do
-        self.read-input-loop ""
-    end
-
-    fun read-input-loop [line] do
-        let event [read-key] do
-            cond do
-                (event.kind eq "eof"): F
-                (event.kind eq "char"): do
-                    write event.text
-                    self.read-input-loop [io.concat [eval line] event.text]
-                end
-                (event.kind eq "backspace"): do
-                    if ([length [eval line]] eq 0) do
-                        self.read-input-loop [eval line]
-                    end do
-                        write "\b \b"
-                        self.read-input-loop [io.drop-last [eval line]]
-                    end
-                end
-                ((event.kind eq "enter") or event.submit): do
-                    write-line ""
-                    eval line
-                end
-                T: do
-                    self.read-input-loop [eval line]
-                end
-            end
-        end
+        read-line
     end
 
     fun loop do
