@@ -1,0 +1,47 @@
+if eq argv 0 do
+    use repl
+    0
+end do
+    cond do
+        #[
+            eq at argc 0 "fmt"
+do
+                use format global
+                if eq argv 2 do
+                    write-line format-file at argc 1
+                    0
+                end do
+                    if and eq argv 3 eq at argc 1 "--write" do
+                        write-formatted-file at argc 2
+                        0
+                    end do
+                        write-line "Usage: sushi fmt <path>"
+                        write-line "       sushi fmt --write <path>"
+                        1
+                    end
+                end
+            end
+        ]
+        #[
+            or eq at argc 0 "-r" eq at argc 0 "--run"
+do
+                if eq argv 2 do
+                    run-file at argc 1
+                    0
+                end do
+                    write-line "Usage: sushi --run <path>"
+                    1
+                end
+            end
+        ]
+        #[
+            T
+do
+                write-line "Usage: sushi [--run <path>]"
+                write-line "       sushi fmt <path>"
+                write-line "       sushi fmt --write <path>"
+                1
+            end
+        ]
+    end
+end

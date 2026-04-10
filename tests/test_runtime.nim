@@ -6,6 +6,7 @@ proc newTestRuntime(): SushiRuntime =
     .registerNativeModule(buildIoModule())
     .registerNativeModule(buildBaseModule())
     .registerNativeModule(buildMathModule())
+    .registerNativeModule(buildSyntaxModule())
 
 suite "sushi runtime":
   test "evaluates arithmetic":
@@ -270,3 +271,145 @@ end
     let runtime = newTestRuntime()
     let value = runtime.runFile(getCurrentDir() / "scripts" / "test.sushi")
     check value.kind != Text or not value.textValue.startsWith("error:")
+
+  test "parses printable terminal input":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key "a"]
+event.text
+""")
+    check value.kind == Text
+    check value.textValue == "a"
+
+  test "parses enter as a distinct key event":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key "\n"]
+event.kind
+""")
+    check value.kind == Text
+    check value.textValue == "enter"
+
+  test "parses kitty shift-enter":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key [io.concat esc "[13;2u"]]
+event.kind
+""")
+    check value.kind == Text
+    check value.textValue == "shift-enter"
+
+  test "parses alternate shift-enter":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key [io.concat esc "[27;2;13~"]]
+event.kind
+""")
+    check value.kind == Text
+    check value.textValue == "shift-enter"
+
+  test "parses arrow keys":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key [io.concat esc "[A"]]
+event.kind
+""")
+    check value.kind == Text
+    check value.textValue == "up"
+
+  test "parses backspace":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key del]
+event.kind
+""")
+    check value.kind == Text
+    check value.textValue == "backspace"
+
+  test "marks shift-enter as submit":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key [io.concat esc "[13;2u"]]
+event.submit
+""")
+    check value.kind == Boolean
+    check value.boolValue
+
+  test "marks unknown escape sequences":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use terminal global
+use io
+var event [parse-key [io.concat esc "[999~"]]
+event.kind
+""")
+    check value.kind == Text
+    check value.textValue == "unknown"
+
+  test "formats simple commands canonically":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use format global
+format-source "+   1   2"
+""")
+    check value.kind == Text
+    check value.textValue == "+ 1 2"
+
+  test "formats blocks and preserves comments":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use format global
+format-source "; lead
+if T do
+; inside
++   1   2 ; tail
+end"
+""")
+    check value.kind == Text
+    check value.textValue == """; lead
+if T do
+    ; inside
+    + 1 2 ; tail
+end"""
+
+  test "formats multiline sequences with comments":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use format global
+format-source "call #[
+1
+; item
+2
+]"
+""")
+    check value.kind == Text
+    check value.textValue == """call #[
+    1
+    ; item
+    2
+]"""
+
+  test "formats files":
+    let runtime = newTestRuntime()
+    let path = getTempDir() / "sushi-format-test.sushi"
+    writeFile(path, "+   4   5")
+    let value = runtime.evaluate("""
+use format global
+format-file """ & "\"" & path.replace("\\", "\\\\") & "\"" & """
+""")
+    check value.kind == Text
+    check value.textValue == "+ 4 5"

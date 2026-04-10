@@ -59,15 +59,17 @@ proc createReplayScope*(env, callerScope: Env): Env =
       callerScope
     else:
       initEnv(callerScope, baseEnv.fallback, state, callerScope.currentModule, false)
-  initEnv(baseEnv, fallbackEnv, state, moduleValue, false)
+  result = initEnv(baseEnv, fallbackEnv, state, moduleValue, false)
 
 proc getModuleGlobalScope*(env: Env): Env =
-  var current = env
-  while not current.isNil:
-    if not current.currentModule.isNil and current.exportsToModule:
-      return current
-    current = current.parent
-  env
+  var last = env
+  result = env
+  while not result.isNil:
+    last = result
+    if not result.currentModule.isNil and result.exportsToModule:
+      return
+    result = result.parent
+  result = last
 
 proc exportValue(moduleValue: Value; name: string; value: Value) =
   moduleValue.exports[name] = value
@@ -150,16 +152,14 @@ proc evaluateStringTemplate(evaluator: Evaluator; tmpl: Value; env: Env): Value 
   newText(buffer, tmpl.span)
 
 proc evaluateScript*(evaluator: Evaluator; script: Value; env: Env): Value =
-  var lastValue = newNilValue()
+  result = newNilValue()
   for command in script.commands:
-    lastValue = evaluator.evaluate(command, env)
-  lastValue
+    result = evaluator.evaluate(command, env)
 
 proc evaluateBlock*(evaluator: Evaluator; blockValue: Value; env: Env): Value =
-  var lastValue = newNilValue()
+  result = newNilValue()
   for command in blockValue.blockCommands:
-    lastValue = evaluator.evaluate(command, env)
-  lastValue
+    result = evaluator.evaluate(command, env)
 
 proc getExport*(moduleValue: Value; memberName: string): Value =
   if moduleValue.exports.hasKey(memberName):

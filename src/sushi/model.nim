@@ -3,27 +3,27 @@ import diagnostics
 
 type
   ValueKind* = enum
-    Nil,
-    Symbol,
-    Text,
-    StringTemplate,
-    Integer,
-    Real,
-    Boolean,
-    Sequence,
-    Table,
-    Command,
-    Script,
-    Block,
-    MemberAccess,
-    IndexedAccess,
-    Array,
-    Module,
-    Class,
-    Instance,
-    CapturedSyntax,
-    NativeCommand,
-    UserCommand,
+    Nil
+    Symbol
+    Text
+    StringTemplate
+    Integer
+    Real
+    Boolean
+    Sequence
+    Table
+    Command
+    Script
+    Block
+    MemberAccess
+    IndexedAccess
+    Array
+    Module
+    Class
+    Instance
+    CapturedSyntax
+    NativeCommand
+    UserCommand
     Method
 
   Value* = ref ValueObj

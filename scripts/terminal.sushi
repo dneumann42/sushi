@@ -1,0 +1,48 @@
+use io
+
+var esc [io.char 27]
+var del [io.char 127]
+var backspace [io.char 8]
+
+class KeyEvent [] do
+    field {
+        kind ""
+        text ""
+        submit F
+        sequence ""
+    }
+
+    fun init [[kind "unknown"] [text ""] [submit F] [sequence ""]] do
+        set self.kind [eval kind]
+        set self.text [eval text]
+        set self.submit [eval submit]
+        set self.sequence [eval sequence]
+    end
+end
+
+fun event [kind text submit sequence] do
+    new KeyEvent kind text submit sequence
+end
+
+fun parse-key [sequence] do
+    cond do
+        (sequence eq F): [event "eof" "" F ""]
+        (sequence eq "\r"): [event "enter" "" F sequence]
+        (sequence eq "\n"): [event "enter" "" F sequence]
+        (sequence eq [io.concat esc "[13;2u"]): [event "shift-enter" "" T sequence]
+        (sequence eq [io.concat esc "[27;2;13~"]): [event "shift-enter" "" T sequence]
+        (sequence eq [io.concat esc "[A"]): [event "up" "" F sequence]
+        (sequence eq [io.concat esc "[B"]): [event "down" "" F sequence]
+        (sequence eq [io.concat esc "[C"]): [event "right" "" F sequence]
+        (sequence eq [io.concat esc "[D"]): [event "left" "" F sequence]
+        (sequence eq del): [event "backspace" "" F sequence]
+        (sequence eq backspace): [event "backspace" "" F sequence]
+        (sequence eq esc): [event "escape" "" F sequence]
+        ([length sequence] eq 1): [event "char" sequence F sequence]
+        T: [event "unknown" "" F sequence]
+    end
+end
+
+fun read-key [] do
+    parse-key [io.read-key-sequence]
+end

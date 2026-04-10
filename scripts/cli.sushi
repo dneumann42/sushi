@@ -2,16 +2,37 @@ if (argv eq 0) do
     use repl
     0
 end do
-    if (((argc at 0) eq "-r") or ((argc at 0) eq "--run")) do
-        if (argv eq 2) do
-            run-file (argc at 1)
-            0
-        end do
-            write-line "Usage: sushi --run <path>"
+    cond do
+        ((argc at 0) eq "fmt"): do
+            use format global
+            if (argv eq 2) do
+                write-line [format-file (argc at 1)]
+                0
+            end do
+                if ((argv eq 3) and ((argc at 1) eq "--write")) do
+                    write-formatted-file (argc at 2)
+                    0
+                end do
+                    write-line "Usage: sushi fmt <path>"
+                    write-line "       sushi fmt --write <path>"
+                    1
+                end
+            end
+        end
+        (((argc at 0) eq "-r") or ((argc at 0) eq "--run")): do
+            if (argv eq 2) do
+                run-file (argc at 1)
+                0
+            end do
+                write-line "Usage: sushi --run <path>"
+                1
+            end
+        end
+        T: do
+            write-line "Usage: sushi [--run <path>]"
+            write-line "       sushi fmt <path>"
+            write-line "       sushi fmt --write <path>"
             1
         end
-    end do
-        write-line "Usage: sushi [--run <path>]"
-        1
     end
 end

@@ -1,0 +1,305 @@
+use io
+use syntax global
+
+fun indent [depth] do
+    io.repeat "    " depth
+end
+
+fun node-kind [node] do
+    field [eval node] "kind"
+end
+
+fun node-render [node] do
+    field [eval node] "render"
+end
+
+fun node-leading [node] do
+    field [eval node] "leading-comments"
+end
+
+fun node-trailing [node] do
+    field [eval node] "trailing-comments"
+end
+
+fun node-suffix [node] do
+    var kind [node-kind node]
+    cond do
+        (kind eq "script"): [field [eval node] "suffix-comments"]
+        (kind eq "block"): [field [eval node] "suffix-comments"]
+        (kind eq "sequence"): [field [eval node] "suffix-comments"]
+        (kind eq "table"): [field [eval node] "suffix-comments"]
+        T: #[]
+    end
+end
+
+fun comments-empty [comments] do
+    eq [length comments] 0
+end
+
+fun node-has-leading [node] do
+    not [comments-empty [node-leading node]]
+end
+
+fun node-has-trailing [node] do
+    not [comments-empty [node-trailing node]]
+end
+
+fun emit-comments-from [comments depth index] do
+    if (index eq [length comments]) do
+        ""
+    end do
+        var comment [eval [at comments index]]
+        var line "\(indent depth)\(field comment "text")"
+        if ((index + 1) eq [length comments]) do
+            eval line
+        end do
+            "\(line)\n\(emit-comments-from comments depth (index + 1))"
+        end
+    end
+end
+
+fun emit-comments [comments depth] do
+    emit-comments-from comments depth 0
+end
+
+fun append-comments [body comments depth] do
+    if [comments-empty comments] do
+        eval body
+    end do
+        if (body eq "") do
+            emit-comments comments depth
+        end do
+            "\(body)\n\(emit-comments comments depth)"
+        end
+    end
+end
+
+fun apply-trailing [body comments depth] do
+    if [comments-empty comments] do
+        eval body
+    end do
+        if [io.contains body "\n"] do
+            "\(body)\n\(emit-comments comments depth)"
+        end do
+            var first-comment [field [eval [at comments 0]] "text"]
+            var first-line "\(body) \(first-comment)"
+            if ([length comments] eq 1) do
+                eval first-line
+            end do
+                "\(first-line)\n\(emit-comments-from comments depth 1)"
+            end
+        end
+    end
+end
+
+fun nodes-inlineable [nodes index] do
+    if (index eq [length nodes]) do
+        T
+    end do
+        and [node-inlineable [eval [at nodes index]]] \
+            [nodes-inlineable nodes (index + 1)]
+    end
+end
+
+fun entries-inlineable [entries index] do
+    if (index eq [length entries]) do
+        T
+    end do
+        var entry [eval [at entries index]]
+        and [comments-empty [node-leading entry]] \
+            [and [comments-empty [node-trailing entry]] \
+                [and [node-inlineable [field entry "key"]] \
+                    [and [node-inlineable [field entry "value"]] \
+                        [entries-inlineable entries (index + 1)]]]]
+    end
+end
+
+fun objects-inlineable [objects index] do
+    if (index eq [length objects]) do
+        T
+    end do
+        var obj [eval [at objects index]]
+        and [not [eq [node-kind obj] "block"]] \
+            [and [node-inlineable obj] [objects-inlineable objects (index + 1)]]
+    end
+end
+
+fun node-inlineable [node] do
+    var kind [node-kind node]
+    cond do
+        [node-has-leading node]: F
+        [node-has-trailing node]: F
+        ((kind eq "script") or (kind eq "block")): F
+        (kind eq "sequence"): do
+            and [comments-empty [node-suffix node]] \
+                [and [< [length [node-render node]] 61] \
+                    [nodes-inlineable [field node "items"] 0]]
+        end
+        (kind eq "table"): do
+            and [comments-empty [node-suffix node]] \
+                [and [< [length [node-render node]] 61] \
+                    [entries-inlineable [field node "entries"] 0]]
+        end
+        (kind eq "command"): do
+            and [< [length [node-render node]] 61] \
+                [objects-inlineable [field node "objects"] 0]
+        end
+        T: T
+    end
+end
+
+fun format-entry [entry depth] do
+    var base "\(indent depth)\(format-object [field entry "key"] depth) \
+\(format-object [field entry "value"] depth)"
+    if [node-has-leading entry] do
+        set base "\(emit-comments [node-leading entry] depth)\n\(base)"
+    end
+    apply-trailing base [node-trailing entry] depth
+end
+
+fun format-entries-from [entries depth index] do
+    if (index eq [length entries]) do
+        ""
+    end do
+        var current [format-entry [eval [at entries index]] depth]
+        if ((index + 1) eq [length entries]) do
+            eval current
+        end do
+            "\(current)\n\(format-entries-from entries depth (index + 1))"
+        end
+    end
+end
+
+fun format-nodes-from [nodes depth index] do
+    if (index eq [length nodes]) do
+        ""
+    end do
+        var current [format-node [eval [at nodes index]] depth]
+        if ((index + 1) eq [length nodes]) do
+            eval current
+        end do
+            "\(current)\n\(format-nodes-from nodes depth (index + 1))"
+        end
+    end
+end
+
+fun format-command-objects [objects depth index] do
+    if (index eq [length objects]) do
+        ""
+    end do
+        var current [format-object [eval [at objects index]] depth]
+        if ((index + 1) eq [length objects]) do
+            eval current
+        end do
+            "\(current) \(format-command-objects objects depth (index + 1))"
+        end
+    end
+end
+
+fun format-command-object [node depth] do
+    format-command-objects [field node "objects"] depth 0
+end
+
+fun format-block-inline [node depth] do
+    var commands [field node "commands"]
+    var suffix [node-suffix node]
+
+    if (([length commands] eq 0) and [comments-empty suffix]) do
+        "do\n\(indent depth)end"
+    end do
+        var body [format-nodes-from commands (depth + 1) 0]
+        if [not [comments-empty suffix]] do
+            set body "\(body)\n\(emit-comments suffix (depth + 1))"
+        end
+        "do\n\(body)\n\(indent depth)end"
+    end
+end
+
+fun format-sequence-inline [node depth] do
+    if [node-inlineable node] do
+        node-render node
+    end do
+        var items [field node "items"]
+        var suffix [node-suffix node]
+        if (([length items] eq 0) and [comments-empty suffix]) do
+            node-render node
+        end do
+            var body [format-nodes-from items (depth + 1) 0]
+            if [not [comments-empty suffix]] do
+                set body "\(body)\n\(emit-comments suffix (depth + 1))"
+            end
+            "#[\n\(body)\n\(indent depth)]"
+        end
+    end
+end
+
+fun format-table-inline [node depth] do
+    if [node-inlineable node] do
+        node-render node
+    end do
+        var entries [field node "entries"]
+        var suffix [node-suffix node]
+        if (([length entries] eq 0) and [comments-empty suffix]) do
+            node-render node
+        end do
+            var body [format-entries-from entries (depth + 1) 0]
+            if [not [comments-empty suffix]] do
+                set body "\(body)\n\(emit-comments suffix (depth + 1))"
+            end
+            "{\n\(body)\n\(indent depth)}"
+        end
+    end
+end
+
+fun format-object [node depth] do
+    var kind [node-kind node]
+    cond do
+        (kind eq "block"): [format-block-inline node depth]
+        (kind eq "sequence"): [format-sequence-inline node depth]
+        (kind eq "table"): [format-table-inline node depth]
+        T: [node-render node]
+    end
+end
+
+fun format-node-body [node depth] do
+    var kind [node-kind node]
+    cond do
+        (kind eq "script"): do
+            append-comments [format-nodes-from [field node "commands"] depth 0] \
+                [node-suffix node] depth
+        end
+        (kind eq "block"): [format-block-inline node depth]
+        (kind eq "command"): "\(indent depth)\(format-command-object node depth)"
+        T: "\(indent depth)\(format-object node depth)"
+    end
+end
+
+fun format-node [node depth] do
+    var body [format-node-body node depth]
+
+    if [not (body eq "")] do
+        set body [apply-trailing body [node-trailing node] depth]
+    end
+
+    if [node-has-leading node] do
+        if (body eq "") do
+            set body [emit-comments [node-leading node] depth]
+        end do
+            set body "\(emit-comments [node-leading node] depth)\n\(body)"
+        end
+    end
+
+    eval body
+end
+
+fun format-source [source] do
+    format-node [parse-source source "<format>"] 0
+end
+
+fun format-file [path] do
+    format-source [io.read-file path]
+end
+
+fun write-formatted-file [path] do
+    io.write-file path [format-file path]
+end

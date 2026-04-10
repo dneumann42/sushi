@@ -9,6 +9,7 @@ proc runCli*(args: seq[string]): int =
       .registerNativeModule(buildIoModule())
       .registerNativeModule(buildBaseModule())
       .registerNativeModule(buildMathModule())
+      .registerNativeModule(buildSyntaxModule())
     let cliPath = resolveScriptPath("cli.sushi")
     let cliResult = runtime.evaluateFile(cliPath)
     if cliResult.kind == Integer:

@@ -3,6 +3,11 @@ import diagnostics
 import model
 
 type
+  CommentTrivia* = object
+    text*: string
+    span*: SourceSpan
+    hasCodeBefore*: bool
+
   TokenKind = enum
     Symbol,
     Number,
@@ -82,6 +87,47 @@ proc initParser(source: SourceFile): Parser =
   }.toTable
   result.rightAssociative = @["^"]
   result.unaryOperators = @["not", "-"]
+
+proc tryConsumeLineContinuation(parser: Parser; index: var int): bool
+proc readTextLiteralToken(parser: Parser; index: var int; startPos: int): Token
+
+proc scanComments*(source: SourceFile): seq[CommentTrivia] =
+  var parser = initParser(source)
+  var index = 0
+  var sawCodeOnLine = false
+  let text = source.text
+
+  while index < text.len:
+    let ch = text[index]
+    if ch == '\\':
+      if parser.tryConsumeLineContinuation(index):
+        continue
+      sawCodeOnLine = true
+      inc index
+      continue
+    if ch == '"':
+      discard parser.readTextLiteralToken(index, index)
+      sawCodeOnLine = true
+      continue
+    if ch == ';':
+      let startPos = index
+      while index < text.len and text[index] != '\n':
+        inc index
+      result.add(CommentTrivia(
+        text: text[startPos ..< index],
+        span: sourceSpan(source, startPos, index),
+        hasCodeBefore: sawCodeOnLine
+      ))
+      continue
+    if ch == '\n':
+      sawCodeOnLine = false
+      inc index
+      continue
+    if ch.isSpaceAscii:
+      inc index
+      continue
+    sawCodeOnLine = true
+    inc index
 
 proc span(parser: Parser; startPos, endPos: int): SourceSpan =
   sourceSpan(parser.source, startPos, endPos)
