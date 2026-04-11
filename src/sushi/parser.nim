@@ -72,6 +72,8 @@ proc initParser(source: SourceFile): Parser =
   result.source = source
   result.precedences = {
     ":": 0,
+    "??": 0,
+    "!!": 0,
     "or": 1,
     "and": 2,
     "eq": 3,

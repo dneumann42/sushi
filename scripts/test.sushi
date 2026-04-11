@@ -1,0 +1,17 @@
+use io
+
+fun throw-error [] do
+  error "You suck!"
+end
+
+var x [catch [throw-error] do
+  io.write-error-line error-message
+end]
+
+var y ([throw-error] ?? "You don't suck")
+
+io.write-line y
+
+var z ([throw-error] !! do
+  io.write-error-line "Ooof!!"
+end)

@@ -1034,6 +1034,51 @@ proc errorAtCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   let message = evaluator.evaluateQuoted(args[1], env)
   raise newSushiError(if message.kind == Text: message.textValue else: formatValue(message), target.span)
 
+proc catchCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len < 1 or args.len > 2:
+    raise newSushiError("Native command 'catch' requires 1-2 arguments.")
+  let expr = args[0]
+  try:
+    evaluator.evaluateQuoted(expr, env)
+  except CatchableError as err:
+    if args.len == 2:
+      let doBlock = requireBlock(args[1])
+      var catchEnv = env.push
+      catchEnv.define(newSymbol("error-message"), newText(err.msg))
+      evaluator.evaluateBlock(doBlock, catchEnv)
+    else:
+      newNilValue()
+
+proc coalesceCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 2:
+    raise newSushiError("Native command '??' requires exactly two arguments.")
+  let leftExpr = args[0]
+  let right = args[1]
+  try:
+    evaluator.evaluateQuoted(leftExpr, env)
+  except CatchableError:
+    if right.kind == Block:
+      let rightEnv = env.push
+      rightEnv.define(newSymbol("error-message"), newText(getCurrentException().msg))
+      evaluator.evaluateBlock(right, rightEnv)
+    else:
+      evaluator.evaluateQuoted(right, env)
+
+proc orElseQuitCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 2:
+    raise newSushiError("Native command '!!' requires exactly two arguments.")
+  let leftExpr = args[0]
+  let rightBlock = args[1]
+  if rightBlock.kind != Block:
+    raise newSushiError("Native command '!!' requires a do-block as second argument.")
+  try:
+    evaluator.evaluateQuoted(leftExpr, env)
+  except CatchableError as err:
+    var catchEnv = env.push
+    catchEnv.define(newSymbol("error-message"), newText(err.msg))
+    discard evaluator.evaluateBlock(rightBlock, catchEnv)
+    quit(1)
+
 proc runCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 1:
     raise newSushiError("Native command 'run' requires exactly one argument.")
@@ -1362,6 +1407,9 @@ proc bindNativeCommands(env: Env) =
     ("read-line", readLineCommand),
     ("error", errorCommand),
     ("error-at", errorAtCommand),
+    ("catch", catchCommand),
+    ("??", coalesceCommand),
+    ("!!", orElseQuitCommand),
     ("run", runCommand),
     ("run-file", runFileCommand),
     ("fun", funCommand),

@@ -1,4 +1,4 @@
-import std/[dynlib, os, osproc, strutils, unittest]
+import std/[dynlib, os, osproc, streams, strutils, unittest]
 import ../src/sushi/[embed, model, runtime]
 
 proc newTestRuntime(): SushiRuntime =
@@ -60,6 +60,33 @@ proc buildBinary() =
   let result = execCmdEx(command.join(" "), workingDir = projectRoot)
   doAssert result.exitCode == 0, result.output
   doAssert fileExists(binaryPath)
+
+proc runBinaryWithInput(input: string; workingDir = projectRoot): tuple[exitCode: int, output: string] =
+  let process = startProcess(binaryPath, workingDir = workingDir, options = {poStdErrToStdOut})
+  defer: close(process)
+
+  let inputHandle = process.inputStream
+  inputHandle.write(input)
+  inputHandle.flush()
+  inputHandle.close()
+
+  result.output = process.outputStream.readAll()
+  result.exitCode = waitForExit(process)
+
+proc stripAnsi(text: string): string =
+  var index = 0
+  while index < text.len:
+    if text[index] == '\e':
+      inc index
+      if index < text.len and text[index] == '[':
+        inc index
+        while index < text.len and text[index] notin {'@' .. '~'}:
+          inc index
+        if index < text.len:
+          inc index
+      continue
+    result.add(text[index])
+    inc index
 
 proc withWorkingDir(path: string; body: proc ()) =
   let originalDir = getCurrentDir()
@@ -590,3 +617,21 @@ answer
     let result = execCmdEx(binaryPath.quoteShell & " noop", workingDir = tempDir)
     check result.exitCode == 1
     check "Usage: sushi [--run <path>]" in result.output
+
+  test "repl exposes the previous result through underscore":
+    buildBinary()
+    let result = runBinaryWithInput("+ 1 2\n+ _ 4\n:quit\n")
+    let output = stripAnsi(result.output)
+    check result.exitCode == 0
+    check "Sushi REPL" in output
+    check "> 3" in output
+    check "> 7" in output
+    check "bye" in output
+
+  test "repl initializes underscore before the first command":
+    buildBinary()
+    let result = runBinaryWithInput("table \"v\" _\n:quit\n")
+    let output = stripAnsi(result.output)
+    check result.exitCode == 0
+    check "{\"v\" }" in output
+    check "bye" in output

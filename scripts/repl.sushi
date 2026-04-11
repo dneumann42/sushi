@@ -97,7 +97,10 @@ class Repl [] do
         if (self.current-line eq ":history") do
             self.history.print
         end do
-            io.write-line [run self.current-line]
+            let result [run self.current-line] do
+                set _ result
+                io.write-line result
+            end
         end
     end
     
@@ -107,5 +110,6 @@ class Repl [] do
     end
 end
 
+var _ [run ""]
 var repl [new Repl]
 repl.run
