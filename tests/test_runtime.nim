@@ -1,4 +1,4 @@
-import std/[dynlib, os, osproc, streams, strutils, unittest]
+import std/[dynlib, os, osproc, streams, strutils, tables, unittest]
 import ../src/sushi/diagnostics
 import ../src/sushi/[embed, model, runtime]
 import ../src/sushi/native_modules
@@ -440,6 +440,29 @@ v.y
     check chained.objects[2].objects[0].kind == Symbol
     check chained.objects[2].objects[0].symbolValue == ":dot-index"
 
+  test "does not treat text literals as dot operators":
+    let script = parseScript("""
+var dot-node {
+  kind "symbol"
+  render "."
+  text "."
+}
+""", "<test>")
+    check script.kind == Script
+    check script.commands.len == 1
+    let command = script.commands[0]
+    check command.objects.len == 3
+    let tableValue = command.objects[2]
+    check tableValue.kind == Table
+    let renderKey = newSymbol("render")
+    let textKey = newSymbol("text")
+    check tableValue.entries.hasKey(renderKey)
+    check tableValue.entries.hasKey(textKey)
+    check tableValue.entries[renderKey].kind == Text
+    check tableValue.entries[renderKey].textValue == "."
+    check tableValue.entries[textKey].kind == Text
+    check tableValue.entries[textKey].textValue == "."
+
   test "rejects split operator tokens after member access":
     expect SushiError:
       discard parseScript("(a.b + = 1)", "<test>")
@@ -471,6 +494,19 @@ rows.(0 + 1).(1 + 1)
 """)
     check value.kind == Integer
     check value.intValue == 60
+
+  test "supports chained table member access through dot syntax":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+record V3 x y z
+var v [new V3 1 2 3]
+v.y = {
+  z 30
+}
+v.y.z
+""")
+    check value.kind == Integer
+    check value.intValue == 30
 
   test "loads the embedded prelude without scripts on disk":
     let tempDir = getTempDir() / "sushi-embedded-prelude-test"

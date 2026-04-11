@@ -427,6 +427,10 @@ proc evaluateDotAccess(evaluator: Evaluator; dotAccess: Value; args: seq[Value];
     if accessor.kind != Symbol:
       raise newSushiError("Dot access expects a member name or grouped index.")
     case receiver.kind
+    of Table:
+      if args.len != 0:
+        raise newSushiError("tableKind values are not invokable.")
+      return evaluateTableIndex(receiver, accessor)
     of Module:
       let exported = receiver.getExport(accessor.symbolValue)
       if args.len == 0 and not exported.isCallable:

@@ -324,7 +324,8 @@ proc advance(parser: var Parser): Token =
   inc parser.tokenIndex
 
 proc check(parser: Parser; lexeme: string): bool =
-  not parser.isAtEnd and parser.tokens[parser.tokenIndex].lexeme == lexeme
+  not parser.isAtEnd and parser.tokens[parser.tokenIndex].kind == Symbol and
+    parser.tokens[parser.tokenIndex].lexeme == lexeme
 
 proc checkTerminator(parser: Parser): bool =
   not parser.isAtEnd and parser.tokens[parser.tokenIndex].kind == Terminator

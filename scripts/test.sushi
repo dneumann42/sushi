@@ -5,7 +5,9 @@ record V3 x y z
 var v [new V3 1 2 3]
 ;; records generate these methods by default
 v.x = 10
-v.y = 20
+v.y = {
+  z 30
+}
 
-var y v.y
+var y v.y.z
 io.write-line y ; prints 20
