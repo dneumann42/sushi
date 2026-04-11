@@ -12,6 +12,13 @@ var y [throw-error] ?? "You don't suck"
 
 io.write-line y
 
+let w [throw-error] ?? do 
+  0
+end do
+  io.write-line w
+end
+
 var z [throw-error] !! do
   io.write-error-line "Ooof!!"
 end
+

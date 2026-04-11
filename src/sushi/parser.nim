@@ -410,6 +410,7 @@ proc normalizeTuple(value: Value): Value =
 
 proc readExpression(parser: var Parser; minPrecedence: int): Value
 proc readObject(parser: var Parser): Value
+proc readNonTupleObject(parser: var Parser): Value
 proc readCommand(parser: var Parser): Value
 proc readScript(parser: var Parser): Value
 proc readPostfixExpression(parser: var Parser): Value
@@ -610,9 +611,15 @@ proc readPostfixExpression(parser: var Parser): Value =
       value = newIndexedAccess(value, normalizeTuple(idx), cover(value.span, dot.span, closeTok.span))
       continue
     if parser.isAtEnd or parser.peek.kind != Symbol or not isMemberName(parser.peek.lexeme):
-      raise parserError("Expected member name or '(...)' after '.'.", dot.span)
+      raise parserError("Expected member name or '(...' after '.'.", dot.span)
     let member = parser.advance
     value = newMemberAccess(value, member.lexeme, cover(value.span, dot.span, member.span))
+  while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
+    let op = parser.advance
+    let right = parser.readNonTupleObject()
+    if right.isNil:
+      raise parserError("Expected value after '" & op.lexeme & "'.", op.span)
+    value = newCommand(@[newSymbol(op.lexeme, op.span), value, right], cover(value.span, op.span, right.span))
   value
 
 proc readNonTupleObject(parser: var Parser): Value =
@@ -667,12 +674,6 @@ proc readCommandObject(parser: var Parser; isHead: bool): Value =
     return normalizeTuple(obj)
   else:
     obj = parser.readObject()
-  while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
-    let op = parser.advance
-    let right = parser.readNonTupleObject()
-    if right.isNil:
-      raise parserError("Expected value after '" & op.lexeme & "'.", op.span)
-    obj = newCommand(@[newSymbol(op.lexeme, op.span), obj, right], cover(obj.span, op.span, right.span))
   obj
 
 proc readObject(parser: var Parser): Value =
@@ -687,12 +688,6 @@ proc readObject(parser: var Parser): Value =
     if nextValue.isNil:
       raise parserError("Expected value after ':'.", op.span)
     obj = createTupleNode(obj, nextValue, op.span)
-  while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
-    let op = parser.advance
-    let right = parser.readNonTupleObject()
-    if right.isNil:
-      raise parserError("Expected value after '" & op.lexeme & "'.", op.span)
-    obj = newCommand(@[newSymbol(op.lexeme, op.span), obj, right], cover(obj.span, op.span, right.span))
   normalizeTuple(obj)
 
 proc readCommand(parser: var Parser): Value =

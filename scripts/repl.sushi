@@ -77,15 +77,15 @@ class Repl [] do
             cond do
                 (line eq F): do
                     io.write-line "bye"
-                end
+end
                 (line eq ":quit"): do
                     io.write-line "bye"
                 end
                 T: do
-                   set self.current-line [eval line]
+                   set self.current-line line
                    self.handle
                    self.loop
-               end
+                end
             end
         end
     end
@@ -97,10 +97,10 @@ class Repl [] do
         if (self.current-line eq ":history") do
             self.history.print
         end do
-            let result [run self.current-line] do
-                set _ result
-                io.write-line result
+            var result [run self.current-line] ?? do
+              io.write-error-line error-message
             end
+            io.write-line result
         end
     end
     

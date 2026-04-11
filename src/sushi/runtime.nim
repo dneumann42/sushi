@@ -1039,15 +1039,15 @@ proc catchCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     raise newSushiError("Native command 'catch' requires 1-2 arguments.")
   let expr = args[0]
   try:
-    evaluator.evaluateQuoted(expr, env)
+    result = evaluator.evaluateQuoted(expr, env)
   except CatchableError as err:
     if args.len == 2:
       let doBlock = requireBlock(args[1])
       var catchEnv = env.push
       catchEnv.define(newSymbol("error-message"), newText(err.msg))
-      evaluator.evaluateBlock(doBlock, catchEnv)
+      result = evaluator.evaluateBlock(doBlock, catchEnv)
     else:
-      newNilValue()
+      result = newNilValue()
 
 proc coalesceCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 2:
@@ -1055,14 +1055,14 @@ proc coalesceCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   let leftExpr = args[0]
   let right = args[1]
   try:
-    evaluator.evaluateQuoted(leftExpr, env)
+    result = evaluator.evaluateQuoted(leftExpr, env)
   except CatchableError:
     if right.kind == Block:
       let rightEnv = env.push
       rightEnv.define(newSymbol("error-message"), newText(getCurrentException().msg))
-      evaluator.evaluateBlock(right, rightEnv)
+      result = evaluator.evaluateBlock(right, rightEnv)
     else:
-      evaluator.evaluateQuoted(right, env)
+      result = evaluator.evaluateQuoted(right, env)
 
 proc orElseQuitCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 2:
@@ -1072,11 +1072,11 @@ proc orElseQuitCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value 
   if rightBlock.kind != Block:
     raise newSushiError("Native command '!!' requires a do-block as second argument.")
   try:
-    evaluator.evaluateQuoted(leftExpr, env)
+    result = evaluator.evaluateQuoted(leftExpr, env)
   except CatchableError as err:
     var catchEnv = env.push
     catchEnv.define(newSymbol("error-message"), newText(err.msg))
-    discard evaluator.evaluateBlock(rightBlock, catchEnv)
+    result = evaluator.evaluateBlock(rightBlock, catchEnv)
     quit(1)
 
 proc runCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
