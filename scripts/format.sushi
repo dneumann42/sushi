@@ -149,6 +149,21 @@ fun node-list-command [node] do
     end
 end
 
+fun node-table-command [node] do
+    if [not ([node-kind node] eq "command")] do
+        F
+    end do
+        var objects [field node "objects"]
+        if ([length objects] eq 0) do
+            F
+        end do
+            var head [eval objects.(0)]
+            and ([node-kind head] eq "symbol") \
+                ([field head "text"] eq "table")
+        end
+    end
+end
+
 fun node-inlineable [node] do
     var kind [node-kind node]
     cond do
@@ -156,6 +171,10 @@ fun node-inlineable [node] do
         [node-has-trailing node]: F
         ((kind eq "script") or (kind eq "block")): F
         [node-list-command node]: do
+            and [< [length [node-render node]] 61] \
+                [objects-inlineable-from [field node "objects"] 1]
+        end
+        [node-table-command node]: do
             and [< [length [node-render node]] 61] \
                 [objects-inlineable-from [field node "objects"] 1]
         end
@@ -256,6 +275,35 @@ fun format-list-command-inline [node depth] do
     end
 end
 
+fun format-table-command-items [objects depth index] do
+    if (index eq [length objects]) do
+        ""
+    end do
+        var key [format-node [eval objects.(index)] depth]
+        var value [format-object [eval objects.((index + 1))] depth]
+        var current "\(key) \(value)"
+        if ((index + 2) eq [length objects]) do
+            eval current
+        end do
+            "\(current)\n\(format-table-command-items objects depth (index + 2))"
+        end
+    end
+end
+
+fun format-table-command-inline [node depth] do
+    var objects [field node "objects"]
+    if ([length objects] eq 1) do
+        "[table]"
+    end do
+        if [node-inlineable node] do
+            "[table \(format-command-objects objects depth 1)]"
+        end do
+            var body [format-table-command-items objects (depth + 1) 1]
+            "[table\n\(body)\n\(indent depth)]"
+        end
+    end
+end
+
 fun format-block-inline [node depth] do
     var commands [field node "commands"]
     var suffix [node-suffix node]
@@ -311,6 +359,7 @@ fun format-object [node depth] do
     var kind [node-kind node]
     cond do
         [node-list-command node]: [format-list-command-inline node depth]
+        [node-table-command node]: [format-table-command-inline node depth]
         (kind eq "block"): [format-block-inline node depth]
         (kind eq "sequence"): [format-sequence-inline node depth]
         (kind eq "table"): [format-table-inline node depth]

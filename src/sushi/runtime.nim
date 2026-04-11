@@ -285,7 +285,7 @@ proc formatValue*(value: Value): string =
     for key, item in value.entries.pairs:
       parts.add(formatValue(key))
       parts.add(formatValue(item))
-    "{" & parts.join(" ") & "}"
+    if parts.len == 0: "[table]" else: "[table " & parts.join(" ") & "]"
   of Command:
     if value.isDotAccessCommand:
       formatDotAccess(value)
@@ -721,6 +721,21 @@ proc defineFields(classDef: ClassDef; command: Value; evaluator: Evaluator; env:
       if key.kind != Symbol:
         raise newSushiError("Field names in a field table must be symbols.")
       classDef.declareField(key.symbolValue, evaluator.evaluateQuoted(item, env))
+    return
+  if command.objects.len == 2 and command.objects[1].kind == Command and command.objects[1].objects.len >= 1 and
+      command.objects[1].objects[0].kind == Symbol and command.objects[1].objects[0].symbolValue == "table":
+    let fieldTable = command.objects[1]
+    let tableArgs = fieldTable.objects[1 .. ^1]
+    if tableArgs.len mod 2 != 0:
+      raise newSushiError("Field declaration table requires key/value pairs.")
+    var i = 0
+    while i < tableArgs.len:
+      let key = tableArgs[i]
+      let value = tableArgs[i + 1]
+      if key.kind != Symbol:
+        raise newSushiError("Field names in a field table must be symbols.")
+      classDef.declareField(key.symbolValue, evaluator.evaluateQuoted(value, env))
+      i += 2
     return
   for fieldObject in command.objects[1 .. ^1]:
     if fieldObject.kind != Symbol:

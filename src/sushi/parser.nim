@@ -92,6 +92,17 @@ proc readerReplacementRules(): seq[ReaderReplacementRule] =
         Token(kind: Symbol, lexeme: "list")
       ]),
     ReaderReplacementRule(
+      match: @["{"],
+      replacement: @[
+        Token(kind: Symbol, lexeme: "["),
+        Token(kind: Symbol, lexeme: "table")
+      ]),
+    ReaderReplacementRule(
+      match: @["}"],
+      replacement: @[
+        Token(kind: Symbol, lexeme: "]")
+      ]),
+    ReaderReplacementRule(
       match: @["else"],
       replacement: @[
         Token(kind: Symbol, lexeme: "end"),
@@ -618,30 +629,6 @@ proc readBracketCommand(parser: var Parser): Value =
       objects.add(obj)
   raise parserError("Expected ']' to end command", openTok.span)
 
-proc readTableValue(parser: var Parser): Value =
-  let openTok = parser.expect("{", "Expected '{' to start table")
-  var entries = initTable[Value, Value]()
-  var spans = @[openTok.span]
-  while not parser.isAtEnd and not parser.check("}"):
-    while parser.checkTerminator:
-      parser.consumeTerminator()
-    if parser.check("}"):
-      break
-    let key = parser.readObject()
-    if key.isNil:
-      raise parserError("Expected key in table", openTok.span)
-    let value = parser.readObject()
-    if value.isNil:
-      raise parserError("Expected value in table", key.span)
-    entries[key] = value
-    spans.add(key.span)
-    spans.add(value.span)
-    while parser.checkTerminator:
-      parser.consumeTerminator()
-  let closeTok = parser.expect("}", "Expected '}' to end table", openTok.span)
-  spans.add(closeTok.span)
-  newTable(entries, cover(spans))
-
 proc readBlockValue(parser: var Parser): Value =
   let openTok = parser.expect("do", "Expected 'do' to start block")
   var commands: seq[Value]
@@ -680,8 +667,6 @@ proc readSymbolDrivenObject(parser: var Parser): Value =
     parser.readFnValue
   of "[":
     parser.readBracketCommand
-  of "{":
-    parser.readTableValue
   of "do":
     parser.readBlockValue
   of "(":

@@ -41,6 +41,7 @@ Notes:
 - Identifiers may contain trailing operator suffixes such as `x=`, `x+=`, `name??=`.
 - `:` followed by an identifier-like name tokenizes as one symbol, for example `:done`.
 - `#[` tokenizes as a distinct symbol token and is then rewritten by the reader to `[` `list`.
+- `{` and `}` tokenize as symbol tokens and are then rewritten by the reader to `[` `table` and `]`.
 - Text interpolation uses `\(... )`, and the embedded source is parsed as Sushi syntax.
 - A backslash only has meaning for line continuation or inside text literals.
 
@@ -74,7 +75,6 @@ symbol-driven-object
                    = symbol
                    | parenthesized-expression
                    | bracket-command
-                   | table
                    | block
                    | lambda ;
 
@@ -84,10 +84,6 @@ parenthesized-expression
                    = "(" , expression , ")" ;
 
 bracket-command    = "[" , { terminator } , [ command-object , { command-object } ] , { terminator } , "]" ;
-
-table              = "{" , { terminator } ,
-                     [ object , object , { { terminator } , object , object } ] ,
-                     { terminator } , "}" ;
 
 block              = "do" , { terminator } ,
                      [ command , { { terminator } , command } ] ,
@@ -215,11 +211,13 @@ Before parsing, the reader rewrites exact symbol-token sequences. Current built-
 
 ```text
 #[   => [ list
+{    => [ table
+}    => ]
 else => end do
 elif => end \n if
 ```
 
-So `#[1 2]` is parsed through the normal bracket-command path as `[list 1 2]`, not through a dedicated list-literal grammar rule.
+So `#[1 2]` is parsed through the normal bracket-command path as `[list 1 2]`, and `{a 1}` is parsed as `[table a 1]`, not through dedicated list/table literal grammar rules.
 
 ### Text literals are not operators
 

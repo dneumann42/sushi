@@ -1,4 +1,4 @@
-import std/[dynlib, os, osproc, streams, strutils, tables, unittest]
+import std/[dynlib, os, osproc, streams, strutils, unittest]
 import ../src/sushi/diagnostics
 import ../src/sushi/[embed, model, runtime]
 import ../src/sushi/native_modules
@@ -383,6 +383,15 @@ var xs #[10 20 30]
     check value.kind == Integer
     check value.intValue == 23
 
+  test "supports table syntax via reader replacement":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var t { a 10 b 20 }
++ t.a t.b
+""")
+    check value.kind == Integer
+    check value.intValue == 30
+
   test "supports do-times from the prelude":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -498,15 +507,22 @@ var dot-node {
     let command = script.commands[0]
     check command.objects.len == 3
     let tableValue = command.objects[2]
-    check tableValue.kind == Table
-    let renderKey = newSymbol("render")
-    let textKey = newSymbol("text")
-    check tableValue.entries.hasKey(renderKey)
-    check tableValue.entries.hasKey(textKey)
-    check tableValue.entries[renderKey].kind == Text
-    check tableValue.entries[renderKey].textValue == "."
-    check tableValue.entries[textKey].kind == Text
-    check tableValue.entries[textKey].textValue == "."
+    check tableValue.kind == Command
+    check tableValue.objects.len >= 7
+    check tableValue.objects[0].kind == Symbol
+    check tableValue.objects[0].symbolValue == "table"
+    check tableValue.objects[1].kind == Symbol
+    check tableValue.objects[1].symbolValue == "kind"
+    check tableValue.objects[2].kind == Text
+    check tableValue.objects[2].textValue == "symbol"
+    check tableValue.objects[3].kind == Symbol
+    check tableValue.objects[3].symbolValue == "render"
+    check tableValue.objects[4].kind == Text
+    check tableValue.objects[4].textValue == "."
+    check tableValue.objects[5].kind == Symbol
+    check tableValue.objects[5].symbolValue == "text"
+    check tableValue.objects[6].kind == Text
+    check tableValue.objects[6].textValue == "."
 
   test "rejects split operator tokens after member access":
     expect SushiError:
@@ -891,6 +907,23 @@ format-source "call #[
     2
 ]"""
 
+  test "formats multiline tables with comments":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use format global
+format-source "call {
+a 1
+; item
+b 2
+}"
+""")
+    check value.kind == Text
+    check value.textValue == """call [table
+    a 1
+    ; item
+    b 2
+]"""
+
   test "formats files":
     let runtime = newTestRuntime()
     let path = getTempDir() / "sushi-format-test.sushi"
@@ -999,7 +1032,7 @@ answer
     let result = runBinaryWithInput("table \"v\" _\n:quit\n")
     let output = stripAnsi(result.output)
     check result.exitCode == 0
-    check "{\"v\" }" in output
+    check "[table \"v\" ]" in output
     check "bye" in output
 
   test "repl prints block results without re-executing them":
