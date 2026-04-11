@@ -231,7 +231,7 @@ capture 1 2 3
     let value = runtime.evaluate("""
 use syntax
 fun second-name args do
-  var item [at args 1]
+  var item args.(1)
   var node [syntax.serialize item]
   syntax.text node
 end

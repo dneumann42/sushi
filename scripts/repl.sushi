@@ -76,7 +76,7 @@ class Repl [] do
             cond do
                 (line eq F): do
                     io.write-line "bye"
-end
+                end
                 (line eq ":quit"): do
                     io.write-line "bye"
                 end

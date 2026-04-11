@@ -8,4 +8,4 @@ v.x= 10
 v.y= 20
 
 var y v.y
-write-line y ; prints 20
+io.write-line y ; prints 20

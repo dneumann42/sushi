@@ -64,7 +64,7 @@ fun record-build-init [field-nodes] do
     var commands #[]
     var index 0
     while (index < [count fields]) do
-        var field-node [at fields index]
+        var field-node fields.(index)
         append commands [record-set-command field-node field-node]
         set index (index + 1)
     end
@@ -93,7 +93,7 @@ fun record-build-class [name-node field-nodes] do
     var index 0
 
     while (index < [count fields]) do
-        append field-command-objects [at fields index]
+        append field-command-objects fields.(index)
         set index (index + 1)
     end
 
@@ -102,7 +102,7 @@ fun record-build-class [name-node field-nodes] do
 
     set index 0
     while (index < [count fields]) do
-        var field-node [at fields index]
+        var field-node fields.(index)
         append body-commands [record-build-setter field-node]
         set index (index + 1)
     end
@@ -119,14 +119,14 @@ fun record args do
         error "record expects at least a name."
     end
 
-    var name-item [at args 0]
+    var name-item args.(0)
     var name-node [syntax.serialize name-item]
     syntax.text name-node
     var field-nodes #[]
     var index 1
 
     while (index < [count args]) do
-        var item [at args index]
+        var item args.(index)
         var field-node [syntax.serialize item]
         syntax.text field-node
         append field-nodes field-node

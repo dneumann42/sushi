@@ -3,14 +3,14 @@ if (argc eq 0) do
     0
 end do
     cond do
-        ((argv at 0) eq "fmt"): do
+        (argv.(0) eq "fmt"): do
             use format global
             if (argc eq 2) do
-                write-line [format-file (argv at 1)]
+                write-line [format-file argv.(1)]
                 0
             end do
-                if ((argc eq 3) and ((argv at 1) eq "--write")) do
-                    write-formatted-file (argv at 2)
+                if ((argc eq 3) and (argv.(1) eq "--write")) do
+                    write-formatted-file argv.(2)
                     0
                 end do
                     write-line "Usage: sushi fmt <path>"
@@ -19,9 +19,9 @@ end do
                 end
             end
         end
-        (((argv at 0) eq "-r") or ((argv at 0) eq "--run")): do
+        ((argv.(0) eq "-r") or (argv.(0) eq "--run")): do
             if (argc eq 2) do
-                run-file (argv at 1)
+                run-file argv.(1)
                 0
             end do
                 write-line "Usage: sushi --run <path>"
