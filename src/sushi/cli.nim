@@ -1,15 +1,10 @@
 import diagnostics
+import embed
 import model
-import native_modules
-import runtime
 
 proc runCli*(args: seq[string]): int =
   try:
-    let runtime = newRuntime(args)
-      .registerNativeModule(buildIoModule())
-      .registerNativeModule(buildBaseModule())
-      .registerNativeModule(buildMathModule())
-      .registerNativeModule(buildSyntaxModule())
+    let runtime = newEmbeddedRuntime(args)
     let cliPath = resolveScriptPath("cli.sushi")
     let cliResult = runtime.evaluateFile(cliPath)
     if cliResult.kind == Integer:

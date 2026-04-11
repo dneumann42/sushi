@@ -1399,8 +1399,8 @@ proc registerNativeModule*(runtime: SushiRuntime; definition: NativeModuleDefini
 
 proc bindCliArguments(runtime: SushiRuntime; args: seq[string]) =
   let values = args.mapIt(newText(it))
-  runtime.environment.define(newSymbol("argc"), newSequence(values))
-  runtime.environment.define(newSymbol("argv"), newInteger(args.len))
+  runtime.environment.define(newSymbol("argc"), newInteger(args.len))
+  runtime.environment.define(newSymbol("argv"), newSequence(values))
 
 proc loadPrelude(runtime: SushiRuntime) =
   let preludePath = resolveScriptPath("prelude.sushi")

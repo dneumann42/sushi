@@ -11,3 +11,5 @@ nimcache-*/
 
 .nide-debug.log
 .nide.json
+.codex
+build

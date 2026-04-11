@@ -1,12 +1,65 @@
-import std/[os, strutils, unittest]
-import ../src/sushi/[model, native_modules, runtime]
+import std/[dynlib, os, osproc, strutils, unittest]
+import ../src/sushi/[embed, model, runtime]
 
 proc newTestRuntime(): SushiRuntime =
-  newRuntime()
-    .registerNativeModule(buildIoModule())
-    .registerNativeModule(buildBaseModule())
-    .registerNativeModule(buildMathModule())
-    .registerNativeModule(buildSyntaxModule())
+  newEmbeddedRuntime()
+
+when defined(windows):
+  const sharedLibraryName = "sushi.dll"
+elif defined(macosx):
+  const sharedLibraryName = "libsushi.dylib"
+else:
+  const sharedLibraryName = "libsushi.so"
+
+const
+  projectRoot = currentSourcePath.parentDir.parentDir
+  dynamicLibraryPath = projectRoot / "build" / sharedLibraryName
+  dynamicLibraryCache = projectRoot / "build" / "nimcache" / "dynlib-test"
+  dynamicLibrarySource = projectRoot / "src" / "sushilib.nim"
+
+type
+  SushiRuntimeNewProc = proc (): pointer {.cdecl.}
+  SushiRuntimeNewWithArgsProc = proc (argc: cint; argv: cstringArray): pointer {.cdecl.}
+  SushiRuntimeFreeProc = proc (handle: pointer) {.cdecl.}
+  SushiRuntimeEvalProc = proc (handle: pointer; source: cstring; status: ptr cint): cstring {.cdecl.}
+  SushiRuntimeEvalFileProc = proc (handle: pointer; filePath: cstring; status: ptr cint): cstring {.cdecl.}
+  SushiStringFreeProc = proc (value: cstring) {.cdecl.}
+
+proc buildDynamicLibrary() =
+  createDir(projectRoot / "build")
+  createDir(projectRoot / "build" / "nimcache")
+  let command = [
+    "nim",
+    "c",
+    "--nimcache:" & dynamicLibraryCache,
+    "--app:lib",
+    "-o:" & dynamicLibraryPath,
+    dynamicLibrarySource
+  ]
+  let result = execCmdEx(command.join(" "), workingDir = projectRoot)
+  doAssert result.exitCode == 0, result.output
+  doAssert fileExists(dynamicLibraryPath)
+
+proc loadSymbol[T](library: LibHandle; symbolName: string): T =
+  let symbol = symAddr(library, symbolName)
+  doAssert not symbol.isNil, "missing symbol: " & symbolName
+  cast[T](symbol)
+
+proc callEval(evalProc: SushiRuntimeEvalProc; stringFree: SushiStringFreeProc;
+    runtime: pointer; source: string): tuple[status: cint, text: string] =
+  var status: cint = -1
+  let raw = evalProc(runtime, source, addr status)
+  check not raw.isNil
+  result = (status, $raw)
+  stringFree(raw)
+
+proc callEvalFile(evalFileProc: SushiRuntimeEvalFileProc; stringFree: SushiStringFreeProc;
+    runtime: pointer; filePath: string): tuple[status: cint, text: string] =
+  var status: cint = -1
+  let raw = evalFileProc(runtime, filePath, addr status)
+  check not raw.isNil
+  result = (status, $raw)
+  stringFree(raw)
 
 suite "sushi runtime":
   test "evaluates arithmetic":
@@ -14,6 +67,19 @@ suite "sushi runtime":
     let value = runtime.evaluate("+ 1 2")
     check value.kind == Integer
     check value.intValue == 3
+
+  test "binds argc as count and argv as list":
+    let runtime = newEmbeddedRuntime(@["first", "second"])
+    let argc = runtime.environment.find(newSymbol("argc"))
+    let argv = runtime.environment.find(newSymbol("argv"))
+    check argc.kind == Integer
+    check argc.intValue == 2
+    check argv.kind == Sequence
+    check argv.items.len == 2
+    check argv.items[0].kind == Text
+    check argv.items[0].textValue == "first"
+    check argv.items[1].kind == Text
+    check argv.items[1].textValue == "second"
 
   test "supports classes and fields":
     let runtime = newTestRuntime()
@@ -413,3 +479,48 @@ format-file """ & "\"" & path.replace("\\", "\\\\") & "\"" & """
 """)
     check value.kind == Text
     check value.textValue == "+ 4 5"
+
+  test "runs sushi through the dynamic library":
+    buildDynamicLibrary()
+
+    let library = loadLib(dynamicLibraryPath)
+    require not library.isNil
+    defer: unloadLib(library)
+
+    let runtimeNew = loadSymbol[SushiRuntimeNewProc](library, "sushi_runtime_new")
+    let runtimeNewWithArgs = loadSymbol[SushiRuntimeNewWithArgsProc](library, "sushi_runtime_new_with_args")
+    let runtimeFree = loadSymbol[SushiRuntimeFreeProc](library, "sushi_runtime_free")
+    let runtimeEval = loadSymbol[SushiRuntimeEvalProc](library, "sushi_runtime_eval")
+    let runtimeEvalFile = loadSymbol[SushiRuntimeEvalFileProc](library, "sushi_runtime_eval_file")
+    let stringFree = loadSymbol[SushiStringFreeProc](library, "sushi_string_free")
+
+    let runtime = runtimeNew()
+    require not runtime.isNil
+    defer: runtimeFree(runtime)
+
+    let directEval = callEval(runtimeEval, stringFree, runtime, "+ 40 2")
+    check directEval.status == 0
+    check directEval.text == "42"
+
+    let scriptEval = callEval(runtimeEval, stringFree, runtime, """
+fun answer [] do
+  + 39 3
+end
+answer
+""")
+    check scriptEval.status == 0
+    check scriptEval.text == "42"
+
+    let scriptPath = getTempDir() / "sushi-dynlib-test.sushi"
+    writeFile(scriptPath, "+ 20 22")
+    let fileEval = callEvalFile(runtimeEvalFile, stringFree, runtime, scriptPath)
+    check fileEval.status == 0
+    check fileEval.text == "42"
+
+    let runtimeWithArgs = runtimeNewWithArgs(0, nil)
+    require not runtimeWithArgs.isNil
+    defer: runtimeFree(runtimeWithArgs)
+
+    let noArgEval = callEval(runtimeEval, stringFree, runtimeWithArgs, "+ 41 1")
+    check noArgEval.status == 0
+    check noArgEval.text == "42"
