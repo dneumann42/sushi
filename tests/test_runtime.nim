@@ -16,6 +16,13 @@ const
   dynamicLibraryPath = projectRoot / "build" / sharedLibraryName
   dynamicLibraryCache = projectRoot / "build" / "nimcache" / "dynlib-test"
   dynamicLibrarySource = projectRoot / "src" / "sushilib.nim"
+  binaryPath =
+    when defined(windows):
+      projectRoot / "build" / "sushi.exe"
+    else:
+      projectRoot / "build" / "sushi"
+  binaryCache = projectRoot / "build" / "nimcache" / "bin-test"
+  binarySource = projectRoot / "src" / "sushi.nim"
 
 type
   SushiRuntimeNewProc = proc (): pointer {.cdecl.}
@@ -39,6 +46,28 @@ proc buildDynamicLibrary() =
   let result = execCmdEx(command.join(" "), workingDir = projectRoot)
   doAssert result.exitCode == 0, result.output
   doAssert fileExists(dynamicLibraryPath)
+
+proc buildBinary() =
+  createDir(projectRoot / "build")
+  createDir(projectRoot / "build" / "nimcache")
+  let command = [
+    "nim",
+    "c",
+    "--nimcache:" & binaryCache,
+    "-o:" & binaryPath,
+    binarySource
+  ]
+  let result = execCmdEx(command.join(" "), workingDir = projectRoot)
+  doAssert result.exitCode == 0, result.output
+  doAssert fileExists(binaryPath)
+
+proc withWorkingDir(path: string; body: proc ()) =
+  let originalDir = getCurrentDir()
+  setCurrentDir(path)
+  try:
+    body()
+  finally:
+    setCurrentDir(originalDir)
 
 proc loadSymbol[T](library: LibHandle; symbolName: string): T =
   let symbol = symAddr(library, symbolName)
@@ -225,6 +254,35 @@ eval total
 """)
     check value.kind == Integer
     check value.intValue == 6
+
+  test "loads the embedded prelude without scripts on disk":
+    let tempDir = getTempDir() / "sushi-embedded-prelude-test"
+    createDir(tempDir)
+    withWorkingDir(tempDir, proc () =
+      let runtime = newEmbeddedRuntime()
+      let value = runtime.evaluate("""
+var total 0
+do-times 4 do
+  set total [+ total it]
+end
+eval total
+""")
+      check value.kind == Integer
+      check value.intValue == 6
+    )
+
+  test "loads embedded built-in modules without scripts on disk":
+    let tempDir = getTempDir() / "sushi-embedded-modules-test"
+    createDir(tempDir)
+    withWorkingDir(tempDir, proc () =
+      let runtime = newEmbeddedRuntime()
+      let value = runtime.evaluate("""
+use format global
+format-source "+   20   22"
+""")
+      check value.kind == Text
+      check value.textValue == "+ 20 22"
+    )
 
   test "supports captured block introspection":
     let runtime = newTestRuntime()
@@ -524,3 +582,11 @@ answer
     let noArgEval = callEval(runtimeEval, stringFree, runtimeWithArgs, "+ 41 1")
     check noArgEval.status == 0
     check noArgEval.text == "42"
+
+  test "runs the embedded cli without scripts on disk":
+    buildBinary()
+    let tempDir = getTempDir() / "sushi-embedded-cli-test"
+    createDir(tempDir)
+    let result = execCmdEx(binaryPath.quoteShell & " noop", workingDir = tempDir)
+    check result.exitCode == 1
+    check "Usage: sushi [--run <path>]" in result.output

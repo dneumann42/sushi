@@ -1,4 +1,5 @@
 import std/[math, options, os, sequtils, strformat, strutils, tables]
+import builtin_scripts
 import diagnostics
 import model
 import parser
@@ -563,29 +564,36 @@ proc registerNativeModule*(state: RuntimeState; moduleValue: Value) =
     raise newException(ValueError, "A native module named '" & moduleValue.moduleName & "' is already registered.")
   state.nativeModulesByName[moduleValue.moduleName] = moduleValue
 
-proc loadModuleByPath(state: RuntimeState; moduleName, fullPath: string; evaluator: Evaluator): Value =
-  let normalized = fullPath.normalizedPath
-  if normalized in state.loadingModules:
+proc loadModuleBySource(state: RuntimeState; moduleName, sourceName, sourceText: string; evaluator: Evaluator): Value =
+  if sourceName in state.loadingModules:
     raise newSushiError("Cyclic module import detected for " & moduleName & ".")
-  if state.modulesByPath.hasKey(normalized):
-    return state.modulesByPath[normalized]
-  state.loadingModules.add(normalized)
+  if state.modulesByPath.hasKey(sourceName):
+    return state.modulesByPath[sourceName]
+  state.loadingModules.add(sourceName)
   try:
-    let moduleValue = newModuleValue(moduleName, normalized)
+    let moduleValue = newModuleValue(moduleName, sourceName)
     let moduleEnv = state.rootEnv.createModuleScope(moduleValue)
-    state.modulesByPath[normalized] = moduleValue
-    let source = newSourceFile(normalized, readFile(normalized))
+    state.modulesByPath[sourceName] = moduleValue
+    let source = newSourceFile(sourceName, sourceText)
     moduleValue.lastResult = evaluator.evaluateSource(source, moduleEnv)
     return moduleValue
   except:
-    state.modulesByPath.del(normalized)
+    state.modulesByPath.del(sourceName)
     raise
   finally:
-    state.loadingModules.keepItIf(it != normalized)
+    state.loadingModules.keepItIf(it != sourceName)
+
+proc loadModuleByPath(state: RuntimeState; moduleName, fullPath: string; evaluator: Evaluator): Value =
+  let normalized = fullPath.normalizedPath
+  state.loadModuleBySource(moduleName, normalized, readFile(normalized), evaluator)
 
 proc loadModule*(state: RuntimeState; moduleName, importerFilePath: string; evaluator: Evaluator): Value =
   if state.nativeModulesByName.hasKey(moduleName):
     return state.nativeModulesByName[moduleName]
+  let embeddedModule = findEmbeddedModule(moduleName)
+  if embeddedModule.isSome:
+    let script = embeddedModule.get
+    return state.loadModuleBySource(moduleName, script.sourceName, script.source, evaluator)
   state.loadModuleByPath(moduleName, resolveModulePath(moduleName, importerFilePath), evaluator)
 
 proc loadEntryModule*(state: RuntimeState; filePath: string; evaluator: Evaluator): Value =
@@ -1403,8 +1411,13 @@ proc bindCliArguments(runtime: SushiRuntime; args: seq[string]) =
   runtime.environment.define(newSymbol("argv"), newSequence(values))
 
 proc loadPrelude(runtime: SushiRuntime) =
-  let preludePath = resolveScriptPath("prelude.sushi")
-  discard runtime.evaluator.evaluateSource(newSourceFile(preludePath, readFile(preludePath)), runtime.environment)
+  let embeddedPrelude = findEmbeddedScript("prelude.sushi")
+  if embeddedPrelude.isSome:
+    let prelude = embeddedPrelude.get
+    discard runtime.evaluator.evaluateSource(newSourceFile(prelude.sourceName, prelude.source), runtime.environment)
+  else:
+    let preludePath = resolveScriptPath("prelude.sushi")
+    discard runtime.evaluator.evaluateSource(newSourceFile(preludePath, readFile(preludePath)), runtime.environment)
 
 proc newRuntime*(args: seq[string] = @[]): SushiRuntime =
   let runtimeState = initRuntimeState()
