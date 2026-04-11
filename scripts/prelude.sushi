@@ -9,8 +9,8 @@ fun each [item iterator body] do
 end
 
 fun for [item start stop body] do
-    var current [eval-value start]
-    var end-value [eval-value stop]
+    var current [eval start]
+    var end-value [eval stop]
     var descending (current > end-value)
     var finished F
 
@@ -123,9 +123,8 @@ fun record args do
     var name-node [syntax.serialize name-item]
     syntax.text name-node
     var field-nodes #[]
-    var index 1
 
-    while (index < [count args]) do
+    for index 1 ([count args] - 1) do
         var item args.(index)
         var field-node [syntax.serialize item]
         syntax.text field-node

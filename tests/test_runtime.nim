@@ -1,6 +1,8 @@
 import std/[dynlib, os, osproc, streams, strutils, unittest]
+import ../src/sushi/diagnostics
 import ../src/sushi/[embed, model, runtime]
 import ../src/sushi/native_modules
+import ../src/sushi/parser
 
 proc newTestRuntime(): SushiRuntime =
   newEmbeddedRuntime()
@@ -359,6 +361,65 @@ v.y
 """)
     check value.kind == Integer
     check value.intValue == 20
+
+  test "parses spaced operator suffixes on plain symbols":
+    let script = parseScript("x += 1\nx = 3", "<test>")
+    check script.kind == Script
+    check script.commands.len == 2
+    check script.commands[0].objects.len == 2
+    check script.commands[0].objects[0].kind == Symbol
+    check script.commands[0].objects[0].symbolValue == "x+="
+    check script.commands[0].objects[1].kind == Integer
+    check script.commands[0].objects[1].intValue == 1
+    check script.commands[1].objects.len == 2
+    check script.commands[1].objects[0].kind == Symbol
+    check script.commands[1].objects[0].symbolValue == "x="
+    check script.commands[1].objects[1].kind == Integer
+    check script.commands[1].objects[1].intValue == 3
+
+  test "parses spaced member suffixes before infix operators":
+    let script = parseScript("(a.b += 2 + 4)", "<test>")
+    check script.kind == Script
+    check script.commands.len == 1
+    let expression = script.commands[0].objects[0]
+    check expression.kind == Command
+    check expression.objects.len == 3
+    check expression.objects[0].kind == Symbol
+    check expression.objects[0].symbolValue == "+"
+    check expression.objects[2].kind == Integer
+    check expression.objects[2].intValue == 4
+    let setterCall = expression.objects[1]
+    check setterCall.kind == Command
+    check setterCall.objects.len == 2
+    check setterCall.objects[0].kind == MemberAccess
+    check setterCall.objects[0].memberName == "b+="
+    check setterCall.objects[0].receiver.kind == Symbol
+    check setterCall.objects[0].receiver.symbolValue == "a"
+    check setterCall.objects[1].kind == Integer
+    check setterCall.objects[1].intValue == 2
+
+  test "rejects split operator tokens after member access":
+    expect SushiError:
+      discard parseScript("(a.b + = 1)", "<test>")
+
+  test "supports spaced member operator suffixes at runtime":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+class Counter [] do
+  field value
+  fun init [start] do
+    set self.value start
+  end
+  fun value+= [delta] do
+    set self.value ([eval delta] + self.value)
+  end
+end
+var counter [new Counter 5]
+counter.value += 3
+counter.value
+""")
+    check value.kind == Integer
+    check value.intValue == 8
 
   test "loads the embedded prelude without scripts on disk":
     let tempDir = getTempDir() / "sushi-embedded-prelude-test"

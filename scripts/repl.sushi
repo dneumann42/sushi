@@ -2,9 +2,7 @@ use io
 use syntax global
 use terminal global
 
-class HistoryNode [] do
-    field line next
-end
+record HistoryNode line next
 
 class History [] do
     field head count pending-line walk-node walk-index
@@ -19,9 +17,7 @@ class History [] do
     end
 
     fun add-current do
-        var node [new HistoryNode]
-        set node.line self.pending-line
-        set node.next self.head
+        var node [new HistoryNode self.pending-line self.head]
         set self.head node
         set self.count (self.count + 1)
         self.count

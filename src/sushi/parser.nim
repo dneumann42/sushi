@@ -459,6 +459,53 @@ proc readSymbolValue(parser: var Parser): Value =
   let token = parser.advance
   newSymbol(token.lexeme, token.span)
 
+proc isOperatorSuffixToken(token: Token): bool =
+  if token.kind != Symbol or token.lexeme.len == 0 or token.lexeme[^1] != '=':
+    return false
+  token.lexeme.allIt(it in OperatorChars)
+
+proc hasAttachedOperatorSuffix(lexeme: string): bool =
+  if lexeme.len == 0 or not isIdentifierStart(lexeme[0]):
+    return false
+  var i = 1
+  while i < lexeme.len:
+    let ch = lexeme[i]
+    if ch.isAlphaNumeric or ch == '_' or ch == '-':
+      inc i
+    else:
+      return true
+  false
+
+proc canAbsorbSpacedOperatorSuffix(value: Value): bool =
+  if value.isNil:
+    return false
+  case value.kind
+  of Symbol:
+    not hasAttachedOperatorSuffix(value.symbolValue)
+  of MemberAccess:
+    not hasAttachedOperatorSuffix(value.memberName)
+  else:
+    false
+
+proc appendOperatorSuffix(value: Value; suffix: Token): Value =
+  case value.kind
+  of Symbol:
+    newSymbol(value.symbolValue & suffix.lexeme, cover(value.span, suffix.span))
+  of MemberAccess:
+    newMemberAccess(value.receiver, value.memberName & suffix.lexeme, cover(value.span, suffix.span))
+  else:
+    value
+
+proc tryConsumeSpacedOperatorSuffix(parser: var Parser; value: var Value; suffix: var Token): bool =
+  if parser.isAtEnd or not value.canAbsorbSpacedOperatorSuffix:
+    return false
+  let token = parser.peek
+  if not token.isOperatorSuffixToken:
+    return false
+  suffix = parser.advance
+  value = value.appendOperatorSuffix(suffix)
+  true
+
 proc readPrimaryExpression(parser: var Parser): Value =
   let token = parser.peek
   case token.kind
@@ -507,7 +554,10 @@ proc readBracketCommand(parser: var Parser): Value =
     if parser.check("]"):
       let closeTok = parser.advance
       return newCommand(objects, cover(openTok.span, coverObjects(objects), closeTok.span))
-    let obj = parser.readCommandObject(objects.len == 0)
+    var obj = parser.readCommandObject(objects.len == 0)
+    if objects.len == 0:
+      var suffix: Token
+      discard parser.tryConsumeSpacedOperatorSuffix(obj, suffix)
     if not obj.isNil:
       objects.add(obj)
   raise parserError("Expected ']' to end command", openTok.span)
@@ -641,6 +691,13 @@ proc readExpression(parser: var Parser; minPrecedence: int): Value =
   while not parser.isAtEnd:
     if parser.checkTerminator or parser.check(")"):
       break
+    var suffix: Token
+    if parser.tryConsumeSpacedOperatorSuffix(left, suffix):
+      let right = parser.readNonTupleObject()
+      if right.isNil:
+        raise parserError("Expected value after '" & suffix.lexeme & "'.", suffix.span)
+      left = newCommand(@[left, right], cover(left.span, right.span))
+      continue
     if parser.peek.kind != Symbol:
       break
     let op = parser.peek.lexeme
@@ -699,7 +756,10 @@ proc readCommand(parser: var Parser): Value =
     let lexeme = parser.peek.lexeme
     if lexeme in ["end", "]", "}", ")"]:
       break
-    let obj = parser.readCommandObject(objects.len == 0)
+    var obj = parser.readCommandObject(objects.len == 0)
+    if objects.len == 0:
+      var suffix: Token
+      discard parser.tryConsumeSpacedOperatorSuffix(obj, suffix)
     if not obj.isNil:
       objects.add(obj)
   newCommand(objects, coverObjects(objects))
