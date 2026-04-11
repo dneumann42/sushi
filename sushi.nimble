@@ -12,9 +12,17 @@ bin           = @["sushi"]
 
 requires "nim >= 2.2.8"
 
-task test, "Run the Sushi test suite":
+when defined(windows):
+  const binaryName = "sushi.exe"
+else:
+  const binaryName = "sushi"
+
+proc ensureBuildDirs() =
   mkDir("build")
   mkDir("build/nimcache")
+
+task test, "Run the Sushi test suite":
+  ensureBuildDirs()
   exec "nim c --nimcache:build/nimcache/tests -r tests/test_runtime.nim"
 
 when defined(windows):
@@ -24,7 +32,10 @@ elif defined(macosx):
 else:
   const sharedLibraryName = "libsushi.so"
 
+task buildbin, "Build the Sushi CLI binary":
+  ensureBuildDirs()
+  exec "nim c --nimcache:build/nimcache/bin -o:build/" & binaryName & " src/sushi.nim"
+
 task buildlib, "Build the shared Sushi runtime library":
-  mkDir("build")
-  mkDir("build/nimcache")
+  ensureBuildDirs()
   exec "nim c --nimcache:build/nimcache/lib --app:lib -o:build/" & sharedLibraryName & " src/sushilib.nim"

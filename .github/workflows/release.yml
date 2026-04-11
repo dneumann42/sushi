@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.8
+      - name: Run test suite
+        run: nimble test
+
+  build-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.8
+      - name: Build Linux release artifacts
+        run: |
+          mkdir -p build/nimcache
+          nim c -d:release --nimcache:build/nimcache/bin-linux -o:build/sushi src/sushi.nim
+          nim c -d:release --nimcache:build/nimcache/lib-linux --app:lib -o:build/libsushi.so src/sushilib.nim
+      - name: Package Linux artifacts
+        run: |
+          mkdir -p dist/linux
+          cp build/sushi dist/linux/
+          cp build/libsushi.so dist/linux/
+          tar -C dist/linux -czf sushi-${{ github.ref_name }}-linux-x86_64.tar.gz .
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sushi-linux-x86_64
+          path: sushi-${{ github.ref_name }}-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  build-windows:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.8
+      - name: Install MinGW
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - name: Build Windows release artifacts
+        run: |
+          mkdir -p build/nimcache
+          nim c -d:release --os:windows --cpu:amd64 --cc:gcc --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc --nimcache:build/nimcache/bin-windows -o:build/sushi.exe src/sushi.nim
+          nim c -d:release --os:windows --cpu:amd64 --cc:gcc --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc --nimcache:build/nimcache/lib-windows --app:lib -o:build/sushi.dll src/sushilib.nim
+      - name: Package Windows artifacts
+        run: |
+          mkdir -p dist/windows
+          cp build/sushi.exe dist/windows/
+          cp build/sushi.dll dist/windows/
+          cd dist/windows
+          zip -r ../../sushi-${{ github.ref_name }}-windows-x86_64.zip .
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sushi-windows-x86_64
+          path: sushi-${{ github.ref_name }}-windows-x86_64.zip
+          if-no-files-found: error
+
+  release:
+    needs:
+      - build-linux
+      - build-windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            release-artifacts/sushi-linux-x86_64/sushi-${{ github.ref_name }}-linux-x86_64.tar.gz
+            release-artifacts/sushi-windows-x86_64/sushi-${{ github.ref_name }}-windows-x86_64.zip

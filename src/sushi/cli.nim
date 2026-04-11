@@ -1,6 +1,7 @@
 import diagnostics
 import embed
 import model
+import runtime
 
 proc runCli*(args: seq[string]): int =
   try:
