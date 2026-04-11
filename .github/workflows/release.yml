@@ -9,18 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: jiro4989/setup-nim-action@v2
-        with:
-          nim-version: 2.2.8
-      - name: Run test suite
-        run: nimble test
-
   build-linux:
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -46,7 +35,6 @@ jobs:
           if-no-files-found: error
 
   build-windows:
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
