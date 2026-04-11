@@ -392,6 +392,46 @@ var t { a 10 b 20 }
     check value.kind == Integer
     check value.intValue == 30
 
+  test "table keeps bare symbol keys literal":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var a "x"
+var t [table a 10]
+t.a
+""")
+    check value.kind == Integer
+    check value.intValue == 10
+
+  test "table evaluates explicit bracket keys":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var a "x"
+var t [table [a] 10]
+t.(a)
+""")
+    check value.kind == Integer
+    check value.intValue == 10
+
+  test "reader replacement table syntax keeps bare symbol keys literal":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var a "x"
+var t { a 10 }
+t.a
+""")
+    check value.kind == Integer
+    check value.intValue == 10
+
+  test "table mixes literal and evaluated keys":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var a "x"
+var t [table a 10 [a] 20]
++ t.a t.(a)
+""")
+    check value.kind == Integer
+    check value.intValue == 30
+
   test "supports do-times from the prelude":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""

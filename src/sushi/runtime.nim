@@ -1153,6 +1153,23 @@ proc orElseQuitCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value 
     result = evaluator.evaluateBlock(rightBlock, catchEnv)
     quit(1)
 
+proc concatCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 2:
+    raise newSushiError("Native command '++' requires exactly two arguments.")
+  let leftExpr = args[0]
+  let rightExpr = args[1]
+  try:
+    result = evaluator.evaluateQuoted(leftExpr, env)
+    if result.kind != Text:
+      raise newSushiError("Native command '++' requires text on the left.")
+    let b = evaluator.evaluateQuoted(rightExpr, env)
+    if result.kind != Text:
+      raise newSushiError("Native command '++' requires text on the right.")
+    result = newText(result.textValue & b.textValue)
+  except CatchableError as err:
+    var catchEnv = env.push
+    catchEnv.define(newSymbol("error-message"), newText(err.msg))
+
 proc runCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 1:
     raise newSushiError("Native command 'run' requires exactly one argument.")
@@ -1366,13 +1383,21 @@ proc atCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
 proc listCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   newSequence(args.mapIt(evaluator.evaluateQuoted(it, env)))
 
+proc evaluateTableKey(evaluator: Evaluator; env: Env; key: Value): Value =
+  if key.kind == Command and key.objects.len == 1:
+    evaluator.evaluateQuoted(key.objects[0], env)
+  elif key.kind == Command:
+    evaluator.evaluateQuoted(key, env)
+  else:
+    key
+
 proc tableCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len mod 2 != 0:
     raise newSushiError("Native command 'table' requires an even number of arguments.")
   var entries = initTable[Value, Value]()
   var i = 0
   while i < args.len:
-    entries[evaluator.evaluateQuoted(args[i], env)] = evaluator.evaluateQuoted(args[i + 1], env)
+    entries[evaluator.evaluateTableKey(env, args[i])] = evaluator.evaluateQuoted(args[i + 1], env)
     i += 2
   newTable(entries)
 
@@ -1502,6 +1527,7 @@ proc bindNativeCommands(env: Env) =
     ("catch", catchCommand),
     ("??", coalesceCommand),
     ("!!", orElseQuitCommand),
+    ("++", concatCommand),
     ("run", runCommand),
     ("run-file", runFileCommand),
     ("fun", funCommand),

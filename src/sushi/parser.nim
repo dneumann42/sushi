@@ -59,7 +59,7 @@ proc isIdentifierStart(ch: char): bool =
 proc initParser(source: SourceFile): Parser =
   result.source = source
   result.precedences = {
-    ":": 0, "??": 0, "!!": 0, 
+    ":": 0, "??": 0, "!!": 0, "++" : 0,
     "or": 1, "and": 2, "eq": 3, "not-eq": 3, 
     "<": 4, ">": 4, "+": 5, "-": 5, "*": 6, "/": 6, 
     "%": 6, "^": 7, ".": 8

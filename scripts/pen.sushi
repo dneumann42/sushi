@@ -1,0 +1,24 @@
+use io
+
+fun doc [blk] do
+  var parts #[]
+
+  fun p [kv text] do
+    append parts #[:p kv text]
+  end
+
+  fun heading [kv level text] do
+    append parts #[(:h ++ (to-string level)) kv text]
+  end
+
+  replay blk
+
+  eval parts
+end
+
+var title "World!"
+var d [doc do
+  p { class "text-red" } "Hello \(title)"
+end]
+
+io.write-line d
