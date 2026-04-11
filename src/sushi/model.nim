@@ -104,6 +104,7 @@ type
     parameters*: seq[Value]
     body*: Value
     definingEnv*: Env
+    variadic*: bool
     span*: SourceSpan
 
   MethodDef* = ref object
@@ -113,6 +114,7 @@ type
     definingEnv*: Env
     declaringClass*: ClassDef
     isClassMethod*: bool
+    variadic*: bool
     span*: SourceSpan
 
   ClassDef* = ref object

@@ -3,28 +3,9 @@ use io
 record V3 x y z
 
 var v [new V3 1 2 3]
+;; records generate these methods by default
 v.x= 10
 v.y= 20
 
-fun throw-error [] do
-  error "You suck!"
-end
-
-var x [catch [throw-error] do
-  io.write-error-line error-message
-end]
-
-var y [throw-error] ?? "You don't suck"
-
-io.write-line y
-
-let w [throw-error] ?? do 
-  0
-end do
-  io.write-line w
-end
-
-var z [throw-error] !! do
-  io.write-error-line "Ooof!!"
-end
-
+var y v.y
+write-line y ; prints 20

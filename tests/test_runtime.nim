@@ -215,6 +215,71 @@ Factory.seed 41
     check value.kind == Integer
     check value.intValue == 42
 
+  test "supports variadic functions":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun capture args do
+  count args
+end
+capture 1 2 3
+""")
+    check value.kind == Integer
+    check value.intValue == 3
+
+  test "variadic functions preserve raw arguments":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use syntax
+fun second-name args do
+  var item [at args 1]
+  var node [syntax.serialize item]
+  syntax.text node
+end
+second-name 10 hello
+""")
+    check value.kind == Text
+    check value.textValue == "hello"
+
+  test "supports variadic methods":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+class Collector [] do
+  fun size args do
+    count args
+  end
+end
+var collector [new Collector]
+collector.size 1 2 3
+""")
+    check value.kind == Integer
+    check value.intValue == 3
+
+  test "supports syntax AST round-trip":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use syntax
+var ast [syntax.command [list \
+  [syntax.symbol "+"] \
+  [syntax.serialize 20] \
+  [syntax.serialize 22]]]
+syntax.eval-node ast
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
+  test "rejects malformed syntax AST nodes":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use syntax
+catch do
+  syntax.eval-node [table "kind" "bogus"]
+end do
+  eval error-message
+end
+""")
+    check value.kind == Text
+    check "does not support AST node kind 'bogus'" in value.textValue
+
   test "supports lambdas with command bodies":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -283,6 +348,18 @@ eval total
     check value.kind == Integer
     check value.intValue == 6
 
+  test "supports records from the prelude":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+record V3 x y z
+var v [new V3 1 2 3]
+v.x= 10
+v.y= 20
+v.y
+""")
+    check value.kind == Integer
+    check value.intValue == 20
+
   test "loads the embedded prelude without scripts on disk":
     let tempDir = getTempDir() / "sushi-embedded-prelude-test"
     createDir(tempDir)
@@ -297,6 +374,21 @@ eval total
 """)
       check value.kind == Integer
       check value.intValue == 6
+    )
+
+  test "loads records from the embedded prelude without scripts on disk":
+    let tempDir = getTempDir() / "sushi-embedded-record-prelude-test"
+    createDir(tempDir)
+    withWorkingDir(tempDir, proc () =
+      let runtime = newEmbeddedRuntime()
+      let value = runtime.evaluate("""
+record Point x y
+var p [new Point 4 2]
+p.x= 7
+p.x
+""")
+      check value.kind == Integer
+      check value.intValue == 7
     )
 
   test "loads embedded built-in modules without scripts on disk":
@@ -419,9 +511,9 @@ end
     let value = runtime.evaluateFile(getCurrentDir() / "scripts" / "prose.sushi")
     check not value.isNil
 
-  test "runs shipped script":
+  test "runs shipped prose script":
     let runtime = newTestRuntime()
-    let value = runtime.runFile(getCurrentDir() / "scripts" / "test.sushi")
+    let value = runtime.runFile(getCurrentDir() / "scripts" / "prose.sushi")
     check value.kind != Text or not value.textValue.startsWith("error:")
 
   test "parses printable terminal input":

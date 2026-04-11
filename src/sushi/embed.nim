@@ -3,11 +3,13 @@ import native_modules
 import runtime
 
 proc newEmbeddedRuntime*(args: seq[string] = @[]): SushiRuntime =
-  newRuntime(args)
+  result = newRuntime(args)
+  discard result
     .registerNativeModule(buildIoModule())
     .registerNativeModule(buildBaseModule())
     .registerNativeModule(buildMathModule())
     .registerNativeModule(buildSyntaxModule())
+  result.loadPrelude()
 
 proc evaluateToString*(runtime: SushiRuntime; source: string): string =
   try:

@@ -1,3 +1,5 @@
+use syntax
+
 fun echo [str] do
     write-line str
 end
@@ -46,4 +48,90 @@ fun do-times [n blk] do
         replay blk
         set do-times-index (do-times-index + 1)
     end
+end
+
+fun record-set-command [field-node value-node] do
+    var field [eval field-node]
+    var value [eval value-node]
+    syntax.command [list \
+        [syntax.symbol "set"] \
+        [syntax.member-access [syntax.symbol "self"] [syntax.text field]] \
+        value]
+end
+
+fun record-build-init [field-nodes] do
+    var fields [eval field-nodes]
+    var commands #[]
+    var index 0
+    while (index < [count fields]) do
+        var field-node [at fields index]
+        append commands [record-set-command field-node field-node]
+        set index (index + 1)
+    end
+
+    syntax.command [list \
+        [syntax.symbol "fun"] \
+        [syntax.symbol "init"] \
+        [syntax.command fields] \
+        [syntax.block commands]]
+end
+
+fun record-build-setter [field-node] do
+    var field [eval field-node]
+    syntax.command [list \
+        [syntax.symbol "fun"] \
+        [syntax.symbol "\(syntax.text field)="] \
+        [syntax.command [list [syntax.symbol "value"]]] \
+        [syntax.block [list [record-set-command field [syntax.symbol "value"]]]]]
+end
+
+fun record-build-class [name-node field-nodes] do
+    var name [eval name-node]
+    var fields [eval field-nodes]
+    var body-commands #[]
+    var field-command-objects [list [syntax.symbol "field"]]
+    var index 0
+
+    while (index < [count fields]) do
+        append field-command-objects [at fields index]
+        set index (index + 1)
+    end
+
+    append body-commands [syntax.command field-command-objects]
+    append body-commands [record-build-init fields]
+
+    set index 0
+    while (index < [count fields]) do
+        var field-node [at fields index]
+        append body-commands [record-build-setter field-node]
+        set index (index + 1)
+    end
+
+    syntax.command [list \
+        [syntax.symbol "class"] \
+        name \
+        [syntax.command #[]] \
+        [syntax.block body-commands]]
+end
+
+fun record args do
+    if ([count args] eq 0) do
+        error "record expects at least a name."
+    end
+
+    var name-item [at args 0]
+    var name-node [syntax.serialize name-item]
+    syntax.text name-node
+    var field-nodes #[]
+    var index 1
+
+    while (index < [count args]) do
+        var item [at args index]
+        var field-node [syntax.serialize item]
+        syntax.text field-node
+        append field-nodes field-node
+        set index (index + 1)
+    end
+
+    syntax.eval-node [record-build-class name-node field-nodes] name-item
 end

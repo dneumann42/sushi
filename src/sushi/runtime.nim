@@ -340,13 +340,24 @@ proc evaluateIndexedAccess*(evaluator: Evaluator; indexedAccess: Value; env: Env
 
 proc invokeMethod(mdef: MethodDef; evaluator: Evaluator; classDef: ClassDef; args: seq[Value];
     callerEnv: Env = nil): Value =
-  let required = mdef.parameters.countIt(it.kind == Symbol)
-  if args.len < required or args.len > mdef.parameters.len:
-    raise newSushiError("methodKind " & mdef.declaringClass.name & "." & mdef.name &
-      " expected " & $required & "–" & $mdef.parameters.len & " argument(s), got " & $args.len & ".")
   let callEnv = mdef.definingEnv.push
   callEnv.define(newSymbol("Self"), newClassValue(classDef))
-  for i, parameter in mdef.parameters:
+  if mdef.variadic:
+    if mdef.parameters.len != 1 or mdef.parameters[0].kind != Symbol:
+      raise newSushiError("Variadic method " & mdef.declaringClass.name & "." & mdef.name &
+        " must declare exactly one symbol parameter.")
+    let capturedArgs =
+      if callerEnv.isNil:
+        args
+      else:
+        args.mapIt(captureArgument(it, callerEnv))
+    callEnv.define(newSymbol(mdef.parameters[0].symbolValue), newSequence(capturedArgs))
+  else:
+    let required = mdef.parameters.countIt(it.kind == Symbol)
+    if args.len < required or args.len > mdef.parameters.len:
+      raise newSushiError("methodKind " & mdef.declaringClass.name & "." & mdef.name &
+        " expected " & $required & "–" & $mdef.parameters.len & " argument(s), got " & $args.len & ".")
+    for i, parameter in mdef.parameters:
       if parameter.kind == Symbol:
         let value = if i < args.len: (if callerEnv.isNil: args[i] else: captureArgument(args[i], callerEnv)) else: newNilValue()
         callEnv.define(newSymbol(parameter.symbolValue), value)
@@ -360,10 +371,6 @@ proc invokeMethod(mdef: MethodDef; evaluator: Evaluator; classDef: ClassDef; arg
 
 proc invokeMethod(mdef: MethodDef; evaluator: Evaluator; instance: instanceKind; args: seq[Value];
     callerEnv: Env = nil): Value =
-  let required = mdef.parameters.countIt(it.kind == Symbol)
-  if args.len < required or args.len > mdef.parameters.len:
-    raise newSushiError("methodKind " & mdef.declaringClass.name & "." & mdef.name &
-      " expected " & $required & "–" & $mdef.parameters.len & " argument(s), got " & $args.len & ".")
   let callEnv = mdef.definingEnv.push
   callEnv.define(newSymbol("self"), newInstanceValue(instance))
   callEnv.define(newSymbol("Self"), newClassValue(instance.class))
@@ -374,7 +381,22 @@ proc invokeMethod(mdef: MethodDef; evaluator: Evaluator; instance: instanceKind;
       implementation: proc (ev: Evaluator; superEnv: Env; superArgs: seq[Value]): Value =
         invokeMethod(superMethod, ev, instance, superArgs, superEnv)
     )))
-  for i, parameter in mdef.parameters:
+  if mdef.variadic:
+    if mdef.parameters.len != 1 or mdef.parameters[0].kind != Symbol:
+      raise newSushiError("Variadic method " & mdef.declaringClass.name & "." & mdef.name &
+        " must declare exactly one symbol parameter.")
+    let capturedArgs =
+      if callerEnv.isNil:
+        args
+      else:
+        args.mapIt(captureArgument(it, callerEnv))
+    callEnv.define(newSymbol(mdef.parameters[0].symbolValue), newSequence(capturedArgs))
+  else:
+    let required = mdef.parameters.countIt(it.kind == Symbol)
+    if args.len < required or args.len > mdef.parameters.len:
+      raise newSushiError("methodKind " & mdef.declaringClass.name & "." & mdef.name &
+        " expected " & $required & "–" & $mdef.parameters.len & " argument(s), got " & $args.len & ".")
+    for i, parameter in mdef.parameters:
       if parameter.kind == Symbol:
         let value = if i < args.len: (if callerEnv.isNil: args[i] else: captureArgument(args[i], callerEnv)) else: newNilValue()
         callEnv.define(newSymbol(parameter.symbolValue), value)
@@ -391,21 +413,26 @@ proc invokeValue*(value: Value; evaluator: Evaluator; env: Env; args: seq[Value]
   of NativeCommand:
     value.nativeCommand.implementation(evaluator, env, args)
   of UserCommand:
-    let required = value.userCommand.parameters.countIt(it.kind == Symbol)
-    if args.len < required or args.len > value.userCommand.parameters.len:
-      raise newSushiError("commandKind " & value.userCommand.name & " expected " & $required & "–" &
-        $value.userCommand.parameters.len & " argument(s), got " & $args.len & ".")
     let callEnv = value.userCommand.definingEnv.push
-    for i, parameter in value.userCommand.parameters:
-      if parameter.kind == Symbol:
-        let boundValue = if i < args.len: captureArgument(args[i], env) else: newNilValue()
-        callEnv.define(newSymbol(parameter.symbolValue), boundValue)
-      else:
-        let paramName = parameter.objects[0]
-        let defaultExpr = parameter.objects[1]
-        let boundValue = if i < args.len: captureArgument(args[i], env)
-          else: evaluator.evaluateQuoted(defaultExpr, value.userCommand.definingEnv)
-        callEnv.define(paramName, boundValue)
+    if value.userCommand.variadic:
+      if value.userCommand.parameters.len != 1 or value.userCommand.parameters[0].kind != Symbol:
+        raise newSushiError("Variadic command " & value.userCommand.name & " must declare exactly one symbol parameter.")
+      callEnv.define(newSymbol(value.userCommand.parameters[0].symbolValue), newSequence(args.mapIt(captureArgument(it, env))))
+    else:
+      let required = value.userCommand.parameters.countIt(it.kind == Symbol)
+      if args.len < required or args.len > value.userCommand.parameters.len:
+        raise newSushiError("commandKind " & value.userCommand.name & " expected " & $required & "–" &
+          $value.userCommand.parameters.len & " argument(s), got " & $args.len & ".")
+      for i, parameter in value.userCommand.parameters:
+        if parameter.kind == Symbol:
+          let boundValue = if i < args.len: captureArgument(args[i], env) else: newNilValue()
+          callEnv.define(newSymbol(parameter.symbolValue), boundValue)
+        else:
+          let paramName = parameter.objects[0]
+          let defaultExpr = parameter.objects[1]
+          let boundValue = if i < args.len: captureArgument(args[i], env)
+            else: evaluator.evaluateQuoted(defaultExpr, value.userCommand.definingEnv)
+          callEnv.define(paramName, boundValue)
     evaluator.evaluateBlock(value.userCommand.body, callEnv)
   of Method:
     if value.methodDef.isClassMethod:
@@ -706,8 +733,12 @@ proc defineFields(classDef: ClassDef; command: Value; evaluator: Evaluator; env:
 proc defineClassMethod(classDef: ClassDef; command: Value) =
   let args = command.objects[1 .. ^1]
   if args.len < 2 or args.len > 3:
-    raise newSushiError("methodKind declaration expects 'fun name [params] do ... end' or 'fun name do ... end'.")
-  let parameters = if args.len == 2: @[] else: readParameters(args[1])
+    raise newSushiError("methodKind declaration expects 'fun name [params] do ... end', 'fun name args do ... end', or 'fun name do ... end'.")
+  let variadic = args.len == 3 and args[1].kind == Symbol
+  let parameters =
+    if args.len == 2: @[]
+    elif variadic: @[args[1]]
+    else: readParameters(args[1])
   let body = requireBlock(args[^1])
   let (methodName, isClassMethod) = readMethodName(args[0])
   classDef.defineMethod(MethodDef(
@@ -716,7 +747,8 @@ proc defineClassMethod(classDef: ClassDef; command: Value) =
     body: body,
     definingEnv: classDef.definingEnv,
     declaringClass: classDef,
-    isClassMethod: isClassMethod
+    isClassMethod: isClassMethod,
+    variadic: variadic
   ))
 
 proc defineClassMember(classDef: ClassDef; command: Value; evaluator: Evaluator; env: Env) =
@@ -762,8 +794,15 @@ proc resolveRawValueWithCapture(value: Value; evaluator: Evaluator; env: Env): R
     else:
       return ResolvedValue(value: current, env: currentEnv, hasCapturedEnv: hasCaptured)
 
-proc resolveRawValue(value: Value; evaluator: Evaluator; env: Env): Value =
+proc resolveRawValue*(value: Value; evaluator: Evaluator; env: Env): Value =
   resolveRawValueWithCapture(value, evaluator, env).value
+
+proc capturedEnv*(value: Value; evaluator: Evaluator; env: Env): Env =
+  let resolved = resolveRawValueWithCapture(value, evaluator, env)
+  if resolved.hasCapturedEnv and not resolved.env.isNil:
+    resolved.env
+  else:
+    env
 
 proc findCapturedSyntax(value: Value; env: Env): Value =
   var seenSymbols: seq[string]
@@ -1115,10 +1154,21 @@ proc runFileCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
 proc funCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   discard evaluator
   if args.len < 2 or args.len > 3 or args[0].kind != Symbol:
-    raise newSushiError("Native command 'fun' expects 'fun name [params] do ... end' or 'fun name do ... end'.")
-  let parameters = if args.len == 2: @[] else: readParameters(args[1])
+    raise newSushiError("Native command 'fun' expects 'fun name [params] do ... end', 'fun name args do ... end', or 'fun name do ... end'.")
+  let variadic = args.len == 3 and args[1].kind == Symbol
+  let parameters =
+    if args.len == 2: @[]
+    elif variadic: @[args[1]]
+    else: readParameters(args[1])
   let body = requireBlock(args[^1])
-  let function = userCommandKind(name: args[0].symbolValue, parameters: parameters, body: body, definingEnv: env)
+  let function = userCommandKind(
+    name: args[0].symbolValue,
+    parameters: parameters,
+    body: body,
+    definingEnv: env,
+    variadic: variadic,
+    span: cover(args[0].span, body.span)
+  )
   let functionValue = newUserCommandValue(function)
   env.define(args[0], functionValue)
   functionValue
@@ -1134,6 +1184,7 @@ proc fnCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     parameters: parameters,
     body: body,
     definingEnv: env,
+    variadic: false,
     span: cover(args[0].span, body.span)
   ))
 
@@ -1476,7 +1527,7 @@ proc bindCliArguments(runtime: SushiRuntime; args: seq[string]) =
   runtime.environment.define(newSymbol("argc"), newInteger(args.len))
   runtime.environment.define(newSymbol("argv"), newSequence(values))
 
-proc loadPrelude(runtime: SushiRuntime) =
+proc loadPrelude*(runtime: SushiRuntime) =
   let embeddedPrelude = findEmbeddedScript("prelude.sushi")
   if embeddedPrelude.isSome:
     let prelude = embeddedPrelude.get
@@ -1490,7 +1541,6 @@ proc newRuntime*(args: seq[string] = @[]): SushiRuntime =
   let environment = createRootEnv(runtimeState)
   result = SushiRuntime(evaluator: newEvaluator(), environment: environment, runtimeState: runtimeState)
   result.bindCliArguments(args)
-  result.loadPrelude()
 
 proc evaluate*(runtime: SushiRuntime; source: string): Value =
   runtime.evaluator.evaluateSource(source, "<stdin>", runtime.environment)

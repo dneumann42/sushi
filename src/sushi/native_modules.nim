@@ -28,6 +28,16 @@ proc requireBoolean(value: Value; commandName: string): bool =
     raise newException(ValueError, "'" & commandName & "' expects a boolean.")
   value.boolValue
 
+proc requireTable(value: Value; commandName: string): Value =
+  if value.kind != Table:
+    raise newException(ValueError, "'" & commandName & "' expects a table.")
+  value
+
+proc requireSequence(value: Value; commandName: string): Value =
+  if value.kind != Sequence:
+    raise newException(ValueError, "'" & commandName & "' expects a list.")
+  value
+
 proc put(entries: var Table[Value, Value]; key: string; value: Value) =
   entries[newText(key)] = value
 
@@ -36,6 +46,13 @@ proc newTableValue(pairs: openArray[(string, Value)]): Value =
   for pair in pairs:
     entries.put(pair[0], pair[1])
   newTable(entries)
+
+proc getField(tableValue: Value; key, commandName: string): Value =
+  let tableNode = requireTable(tableValue, commandName)
+  let fieldKey = newText(key)
+  if not tableNode.entries.hasKey(fieldKey):
+    raise newException(ValueError, "'" & commandName & "' is missing required field '" & key & "'.")
+  tableNode.entries[fieldKey]
 
 proc commentValue(comment: CommentTrivia): Value =
   newTableValue({
@@ -88,6 +105,76 @@ proc splitComments(comments: seq[CommentTrivia]; spans: seq[SourceSpan]):
 
 proc serializeNode(node: Value; comments: seq[CommentTrivia] = @[];
     leading: seq[CommentTrivia] = @[]; trailing: seq[CommentTrivia] = @[]): Value
+
+proc deserializeNode(node: Value): Value
+
+proc deserializeNodes(value: Value; fieldName, commandName: string): seq[Value] =
+  let items = requireSequence(getField(value, fieldName, commandName), commandName)
+  for item in items.items:
+    result.add(deserializeNode(item))
+
+proc deserializeTemplateSegments(value: Value; commandName: string): seq[StringTemplateSegment] =
+  let items = requireSequence(getField(value, "segments", commandName), commandName)
+  for item in items.items:
+    let segment = requireTable(item, commandName)
+    let kind = requireText(getField(segment, "kind", commandName), commandName)
+    case kind
+    of "text":
+      result.add(StringTemplateSegment(kind: Text, text: requireText(getField(segment, "text", commandName), commandName)))
+    of "object":
+      result.add(StringTemplateSegment(kind: Object, obj: deserializeNode(getField(segment, "object", commandName))))
+    else:
+      raise newException(ValueError, "'" & commandName & "' does not support string template segment kind '" & kind & "'.")
+
+proc deserializeTableEntries(value: Value; commandName: string): Table[Value, Value] =
+  let items = requireSequence(getField(value, "entries", commandName), commandName)
+  result = initTable[Value, Value]()
+  for item in items.items:
+    let entry = requireTable(item, commandName)
+    let kind = requireText(getField(entry, "kind", commandName), commandName)
+    if kind != "entry":
+      raise newException(ValueError, "'" & commandName & "' expects table entries with kind 'entry'.")
+    result[deserializeNode(getField(entry, "key", commandName))] = deserializeNode(getField(entry, "value", commandName))
+
+proc deserializeNode(node: Value): Value =
+  let commandName = "eval-node"
+  let tableNode = requireTable(node, commandName)
+  let kind = requireText(getField(tableNode, "kind", commandName), commandName)
+  case kind
+  of "script":
+    newScript(deserializeNodes(tableNode, "commands", commandName))
+  of "block":
+    newBlock(deserializeNodes(tableNode, "commands", commandName))
+  of "command":
+    newCommand(deserializeNodes(tableNode, "objects", commandName))
+  of "sequence":
+    newSequence(deserializeNodes(tableNode, "items", commandName))
+  of "table":
+    newTable(deserializeTableEntries(tableNode, commandName))
+  of "member-access":
+    newMemberAccess(
+      deserializeNode(getField(tableNode, "receiver", commandName)),
+      requireText(getField(tableNode, "member-name", commandName), commandName)
+    )
+  of "indexed-access":
+    newIndexedAccess(
+      deserializeNode(getField(tableNode, "receiver", commandName)),
+      deserializeNode(getField(tableNode, "index", commandName))
+    )
+  of "string-template":
+    newStringTemplate(deserializeTemplateSegments(tableNode, commandName))
+  of "symbol":
+    newSymbol(requireText(getField(tableNode, "text", commandName), commandName))
+  of "text":
+    newText(requireText(getField(tableNode, "text", commandName), commandName))
+  of "integer":
+    newInteger(parseInt(requireText(getField(tableNode, "text", commandName), commandName)))
+  of "real":
+    newReal(parseFloat(requireText(getField(tableNode, "text", commandName), commandName)))
+  of "boolean":
+    newBoolean(requireText(getField(tableNode, "text", commandName), commandName) == "T")
+  else:
+    raise newException(ValueError, "'eval-node' does not support AST node kind '" & kind & "'.")
 
 proc baseNode(kind: string; node: Value; leading, trailing: seq[CommentTrivia]): Table[Value, Value] =
   result = initTable[Value, Value]()
@@ -738,6 +825,84 @@ proc buildSyntaxModule*(): NativeModuleDefinition =
     let ast = parseScript(source)
     let comments = scanComments(source)
     serializeNode(ast, comments))
+
+  discard builder.command("serialize", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'serialize' expects exactly one argument.")
+    serializeNode(evaluator.evaluateQuoted(args[0], env)))
+
+  discard builder.command("text", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'text' expects exactly one argument.")
+    let node = requireTable(evaluator.evaluateQuoted(args[0], env), "text")
+    let kind = requireText(getField(node, "kind", "text"), "text")
+    if kind != "symbol":
+      raise newException(ValueError, "'text' expects a symbol AST node.")
+    newText(requireText(getField(node, "text", "text"), "text")))
+
+  discard builder.command("symbol", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'symbol' expects exactly one argument.")
+    serializeNode(newSymbol(requireText(evaluator.evaluateQuoted(args[0], env), "symbol"))))
+
+  discard builder.command("command", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'command' expects exactly one argument.")
+    let items = requireSequence(evaluator.evaluateQuoted(args[0], env), "command")
+    var objects: seq[Value]
+    for item in items.items:
+      objects.add(requireTable(item, "command"))
+    newTableValue({
+      "kind": newText("command"),
+      "render": newText(""),
+      "start": newInteger(0),
+      "finish": newInteger(0),
+      "leading-comments": newSequence(@[]),
+      "trailing-comments": newSequence(@[]),
+      "objects": newSequence(objects)
+    }))
+
+  discard builder.command("block", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'block' expects exactly one argument.")
+    let items = requireSequence(evaluator.evaluateQuoted(args[0], env), "block")
+    var commands: seq[Value]
+    for item in items.items:
+      commands.add(requireTable(item, "block"))
+    newTableValue({
+      "kind": newText("block"),
+      "render": newText(""),
+      "start": newInteger(0),
+      "finish": newInteger(0),
+      "leading-comments": newSequence(@[]),
+      "trailing-comments": newSequence(@[]),
+      "suffix-comments": newSequence(@[]),
+      "commands": newSequence(commands)
+    }))
+
+  discard builder.command("member-access", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 2:
+      raise newException(ValueError, "'member-access' expects a receiver node and a member name.")
+    newTableValue({
+      "kind": newText("member-access"),
+      "render": newText(""),
+      "start": newInteger(0),
+      "finish": newInteger(0),
+      "leading-comments": newSequence(@[]),
+      "trailing-comments": newSequence(@[]),
+      "receiver": requireTable(evaluator.evaluateQuoted(args[0], env), "member-access"),
+      "member-name": newText(requireText(evaluator.evaluateQuoted(args[1], env), "member-access"))
+    }))
+
+  discard builder.command("eval-node", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len < 1 or args.len > 2:
+      raise newException(ValueError, "'eval-node' expects an AST node and an optional scope argument.")
+    let targetEnv =
+      if args.len == 2:
+        capturedEnv(args[1], evaluator, env)
+      else:
+        env
+    evaluator.evaluate(deserializeNode(evaluator.evaluateQuoted(args[0], env)), targetEnv))
 
   discard builder.command("field", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     if args.len != 2:
