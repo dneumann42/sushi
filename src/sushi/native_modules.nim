@@ -1,5 +1,9 @@
-import std/[colors, math, sequtils, strutils, tables, terminal, rdstdin, sugar]
-when not defined(windows):
+import std/[colors, math, sequtils, strutils, tables, terminal]
+when defined(windows):
+  import std/winlean
+  proc getConsoleMode(hConsoleHandle: Handle; dwMode: ptr DWORD): WINBOOL {.
+      stdcall, dynlib: "kernel32", importc: "GetConsoleMode".}
+else:
   import std/[posix, termios]
 import diagnostics
 import parser
@@ -231,6 +235,292 @@ proc dropLastByte(text: string): string =
   result = text
   result.setLen(result.len - 1)
 
+type
+  ReadlineActionKind* = enum
+    rakNone,
+    rakInsertText,
+    rakMoveLeft,
+    rakMoveRight,
+    rakHistoryPrev,
+    rakHistoryNext,
+    rakBackspace,
+    rakClearScreen,
+    rakSubmit,
+    rakEof
+
+  ReadlineAction* = object
+    kind*: ReadlineActionKind
+    text*: string
+
+  ReadlineState* = object
+    prompt*: string
+    buffer*: string
+    cursor*: int
+    history*: seq[string]
+    historyIndex*: int
+    draft*: string
+
+  ReadlineEffect* = object
+    redraw*: bool
+    clearScreen*: bool
+    submit*: bool
+    eof*: bool
+
+var readlineHistory*: seq[string] = @[]
+
+proc initReadlineState*(prompt: string; history: seq[string] = @[]): ReadlineState =
+  ReadlineState(
+    prompt: prompt,
+    buffer: "",
+    cursor: 0,
+    history: history,
+    historyIndex: history.len,
+    draft: ""
+  )
+
+proc action(kind: ReadlineActionKind; text = ""): ReadlineAction =
+  ReadlineAction(kind: kind, text: text)
+
+proc insertAt(text: string; index: int; fragment: string): string =
+  let safeIndex = max(0, min(index, text.len))
+  let prefix =
+    if safeIndex > 0:
+      text[0 ..< safeIndex]
+    else:
+      ""
+  let suffix =
+    if safeIndex < text.len:
+      text[safeIndex .. ^1]
+    else:
+      ""
+  prefix & fragment & suffix
+
+proc removeAt(text: string; index: int): string =
+  if index < 0 or index >= text.len:
+    return text
+  let prefix =
+    if index > 0:
+      text[0 ..< index]
+    else:
+      ""
+  let suffix =
+    if index + 1 < text.len:
+      text[(index + 1) .. ^1]
+    else:
+      ""
+  prefix & suffix
+
+proc applyReadlineAction*(state: var ReadlineState; event: ReadlineAction): ReadlineEffect =
+  case event.kind
+  of rakInsertText:
+    if event.text.len > 0:
+      state.buffer = insertAt(state.buffer, state.cursor, event.text)
+      inc(state.cursor, event.text.len)
+      result.redraw = true
+  of rakMoveLeft:
+    if state.cursor > 0:
+      dec(state.cursor)
+      result.redraw = true
+  of rakMoveRight:
+    if state.cursor < state.buffer.len:
+      inc(state.cursor)
+      result.redraw = true
+  of rakHistoryPrev:
+    if state.history.len > 0 and state.historyIndex > 0:
+      if state.historyIndex == state.history.len:
+        state.draft = state.buffer
+      dec(state.historyIndex)
+      state.buffer = state.history[state.historyIndex]
+      state.cursor = state.buffer.len
+      result.redraw = true
+  of rakHistoryNext:
+    if state.historyIndex < state.history.len:
+      inc(state.historyIndex)
+      if state.historyIndex == state.history.len:
+        state.buffer = state.draft
+      else:
+        state.buffer = state.history[state.historyIndex]
+      state.cursor = state.buffer.len
+      result.redraw = true
+  of rakBackspace:
+    if state.cursor > 0:
+      dec(state.cursor)
+      state.buffer = removeAt(state.buffer, state.cursor)
+      result.redraw = true
+  of rakClearScreen:
+    result.clearScreen = true
+    result.redraw = true
+  of rakSubmit:
+    result.submit = true
+  of rakEof:
+    result.eof = true
+  of rakNone:
+    discard
+
+proc decodeUnixReadlineSequence*(sequence: string): ReadlineAction =
+  case sequence
+  of "":
+    action(rakEof)
+  of "\r", "\n":
+    action(rakSubmit)
+  of "\x7f", "\x08":
+    action(rakBackspace)
+  of "\x0c":
+    action(rakClearScreen)
+  of "\x04":
+    action(rakEof)
+  of "\e[A":
+    action(rakHistoryPrev)
+  of "\e[B":
+    action(rakHistoryNext)
+  of "\e[C":
+    action(rakMoveRight)
+  of "\e[D":
+    action(rakMoveLeft)
+  else:
+    if sequence.len == 1 and sequence[0] >= ' ':
+      action(rakInsertText, sequence)
+    else:
+      action(rakNone)
+
+proc decodeWindowsReadlineKey*(first: char; second = '\0'): ReadlineAction =
+  case first
+  of '\r', '\n':
+    action(rakSubmit)
+  of '\b', '\x7f':
+    action(rakBackspace)
+  of '\x0c':
+    action(rakClearScreen)
+  of '\x1a':
+    action(rakEof)
+  of '\x00', '\xe0':
+    case second
+    of 'H':
+      action(rakHistoryPrev)
+    of 'P':
+      action(rakHistoryNext)
+    of 'M':
+      action(rakMoveRight)
+    of 'K':
+      action(rakMoveLeft)
+    else:
+      action(rakNone)
+  else:
+    if first >= ' ':
+      action(rakInsertText, $first)
+    else:
+      action(rakNone)
+
+proc isInteractiveStdin*(): bool =
+  when defined(windows):
+    let handle = getStdHandle(STD_INPUT_HANDLE)
+    if handle == INVALID_HANDLE_VALUE:
+      return false
+    var mode: DWORD
+    getConsoleMode(handle, addr mode) != 0
+  else:
+    stdin.getFileHandle().isatty() != 0
+
+proc clearScreenAndHome() =
+  stdout.eraseScreen()
+  stdout.setCursorPos(0, 0)
+
+proc redrawReadline(state: ReadlineState; previousWidth: var int) =
+  stdout.write("\r")
+  stdout.write(state.prompt)
+  stdout.write(state.buffer)
+  let currentWidth = state.prompt.len + state.buffer.len
+  if previousWidth > currentWidth:
+    stdout.write(repeat(' ', previousWidth - currentWidth))
+  stdout.write("\r")
+  stdout.write(state.prompt)
+  if state.cursor > 0:
+    stdout.write(state.buffer[0 ..< state.cursor])
+  stdout.flushFile()
+  previousWidth = currentWidth
+
+proc readInteractiveUnixSequence(fd: cint): string =
+  var ch: char
+  let count = readBuffer(stdin, addr ch, 1)
+  if count <= 0:
+    return ""
+  result.add(ch)
+  if ch != '\e':
+    return
+
+  while true:
+    let nextCount = readBuffer(stdin, addr ch, 1)
+    if nextCount <= 0:
+      break
+    result.add(ch)
+    if ch in {'A', 'B', 'C', 'D'}:
+      break
+    if result.len == 2 and result[1] != '[':
+      break
+    if result.len > 3:
+      break
+
+proc readInteractiveLine*(prompt: string; history: seq[string] = @[]): tuple[ok: bool, line: string] =
+  var state = initReadlineState(prompt, history)
+  var previousWidth = 0
+  stdout.write(prompt)
+  stdout.flushFile()
+
+  when defined(windows):
+    while true:
+      let first = getch()
+      let event =
+        if first == '\x00' or first == '\xe0':
+          decodeWindowsReadlineKey(first, getch())
+        else:
+          decodeWindowsReadlineKey(first)
+      let effect = state.applyReadlineAction(event)
+      if effect.eof:
+        stdout.write("\n")
+        stdout.flushFile()
+        return (false, "")
+      if effect.clearScreen:
+        clearScreenAndHome()
+      if effect.redraw:
+        redrawReadline(state, previousWidth)
+      if effect.submit:
+        stdout.write("\n")
+        stdout.flushFile()
+        return (true, state.buffer)
+  else:
+    let fd = stdin.getFileHandle()
+    var oldMode, rawMode: Termios
+    var pendingResult: tuple[done: bool, ok: bool, line: string]
+    discard fd.tcGetAttr(addr oldMode)
+    rawMode = oldMode
+    rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or INPCK or ISTRIP or IXON)
+    rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
+    rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+    rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or IEXTEN or ISIG)
+    rawMode.c_cc[VMIN] = char(1)
+    rawMode.c_cc[VTIME] = char(0)
+    discard fd.tcSetAttr(TCSAFLUSH, addr rawMode)
+    try:
+      while true:
+        let event = decodeUnixReadlineSequence(readInteractiveUnixSequence(fd))
+        let effect = state.applyReadlineAction(event)
+        if effect.eof:
+          pendingResult = (true, false, "")
+          break
+        if effect.clearScreen:
+          clearScreenAndHome()
+        if effect.redraw:
+          redrawReadline(state, previousWidth)
+        if effect.submit:
+          pendingResult = (true, true, state.buffer)
+          break
+    finally:
+      discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
+    if pendingResult.done:
+      stdout.writeLine("")
+      stdout.flushFile()
+      return (pendingResult.ok, pendingResult.line)
+
 proc readKeySequence(): Value =
   when defined(windows):
     newText($getch())
@@ -321,9 +611,34 @@ proc buildIoModule*(): NativeModuleDefinition =
     discard env
     discard args
     try:
-      newText(readLineFromStdin(""))
+      newText(stdin.readLine())
     except EOFError:
       newBoolean(false))
+
+  discard builder.command("readline", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    let prompt =
+      if args.len > 0:
+        requireText(evaluator.evaluateQuoted(args[0], env), "readline")
+      else:
+        ""
+    if isInteractiveStdin():
+      let line = readInteractiveLine(prompt, readlineHistory)
+      if line.ok:
+        newText(line.line)
+      else:
+        newBoolean(false)
+    else:
+      stdout.write(prompt)
+      stdout.flushFile()
+      try:
+        newText(stdin.readLine())
+      except EOFError:
+        newBoolean(false))
+
+  discard builder.command("readline-history-add", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    let entry = requireText(evaluator.evaluateQuoted(args[0], env), "readline-history-add")
+    readlineHistory.add(entry)
+    newInteger(readlineHistory.len))
 
   discard builder.command("read-file", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     let path = requireText(evaluator.evaluateQuoted(args[0], env), "read-file")

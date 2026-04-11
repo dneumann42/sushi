@@ -68,12 +68,10 @@ class Repl [] do
     end
 
     fun read-input do
-        read-line
+        io.readline "> "
     end
 
     fun loop do
-        io.set-fg "Green"
-        io.write "> "
         let line [self.read-input] do
             cond do
                 (line eq F): do
@@ -92,6 +90,7 @@ end
     end
 
     fun handle do
+        io.readline-history-add self.current-line
         set self.history.pending-line self.current-line
         self.history.add-current
         io.set-fg "White"
@@ -101,8 +100,12 @@ end
             catch do
                 let form [capture-source self.current-line] do
                     var result [run self.current-line]
-                    set _ form
                     io.write-line [raw result]
+                    catch do
+                        set _ form
+                    end do
+                        F
+                    end
                 end
             end do
               io.write-error-line error-message

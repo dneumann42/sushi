@@ -1,5 +1,6 @@
 import std/[dynlib, os, osproc, streams, strutils, unittest]
 import ../src/sushi/[embed, model, runtime]
+import ../src/sushi/native_modules
 
 proc newTestRuntime(): SushiRuntime =
   newEmbeddedRuntime()
@@ -510,6 +511,57 @@ event.kind
 """)
     check value.kind == Text
     check value.textValue == "unknown"
+
+  test "readline inserts text into the middle of the buffer":
+    var state = initReadlineState("> ")
+    discard state.applyReadlineAction(ReadlineAction(kind: rakInsertText, text: "a"))
+    discard state.applyReadlineAction(ReadlineAction(kind: rakInsertText, text: "c"))
+    discard state.applyReadlineAction(ReadlineAction(kind: rakMoveLeft))
+    discard state.applyReadlineAction(ReadlineAction(kind: rakInsertText, text: "b"))
+    check state.buffer == "abc"
+    check state.cursor == 2
+
+  test "readline backspace removes the character before the cursor":
+    var state = initReadlineState("> ")
+    discard state.applyReadlineAction(ReadlineAction(kind: rakInsertText, text: "abc"))
+    discard state.applyReadlineAction(ReadlineAction(kind: rakMoveLeft))
+    discard state.applyReadlineAction(ReadlineAction(kind: rakBackspace))
+    check state.buffer == "ac"
+    check state.cursor == 1
+
+  test "readline history restores the current draft":
+    var state = initReadlineState("> ", @["first", "second"])
+    discard state.applyReadlineAction(ReadlineAction(kind: rakInsertText, text: "draft"))
+    discard state.applyReadlineAction(ReadlineAction(kind: rakHistoryPrev))
+    check state.buffer == "second"
+    discard state.applyReadlineAction(ReadlineAction(kind: rakHistoryPrev))
+    check state.buffer == "first"
+    discard state.applyReadlineAction(ReadlineAction(kind: rakHistoryNext))
+    check state.buffer == "second"
+    discard state.applyReadlineAction(ReadlineAction(kind: rakHistoryNext))
+    check state.buffer == "draft"
+    check state.cursor == 5
+
+  test "readline ctrl-l requests a clear and redraw":
+    var state = initReadlineState("> ")
+    let effect = state.applyReadlineAction(ReadlineAction(kind: rakClearScreen))
+    check effect.clearScreen
+    check effect.redraw
+    check state.buffer == ""
+
+  test "readline decodes unix arrow keys and ctrl-l":
+    check decodeUnixReadlineSequence("\e[A").kind == rakHistoryPrev
+    check decodeUnixReadlineSequence("\e[B").kind == rakHistoryNext
+    check decodeUnixReadlineSequence("\e[C").kind == rakMoveRight
+    check decodeUnixReadlineSequence("\e[D").kind == rakMoveLeft
+    check decodeUnixReadlineSequence("\x0c").kind == rakClearScreen
+
+  test "readline decodes windows arrow keys and ctrl-l":
+    check decodeWindowsReadlineKey('\xe0', 'H').kind == rakHistoryPrev
+    check decodeWindowsReadlineKey('\xe0', 'P').kind == rakHistoryNext
+    check decodeWindowsReadlineKey('\xe0', 'M').kind == rakMoveRight
+    check decodeWindowsReadlineKey('\xe0', 'K').kind == rakMoveLeft
+    check decodeWindowsReadlineKey('\x0c').kind == rakClearScreen
 
   test "formats simple commands canonically":
     let runtime = newTestRuntime()

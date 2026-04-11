@@ -1,5 +1,11 @@
 use io
 
+record V3 x y z
+
+var v [new V3 1 2 3]
+v.x= 10
+v.y= 20
+
 fun throw-error [] do
   error "You suck!"
 end
