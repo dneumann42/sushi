@@ -1158,17 +1158,13 @@ proc concatCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     raise newSushiError("Native command '++' requires exactly two arguments.")
   let leftExpr = args[0]
   let rightExpr = args[1]
-  try:
-    result = evaluator.evaluateQuoted(leftExpr, env)
-    if result.kind != Text:
-      raise newSushiError("Native command '++' requires text on the left.")
-    let b = evaluator.evaluateQuoted(rightExpr, env)
-    if result.kind != Text:
-      raise newSushiError("Native command '++' requires text on the right.")
-    result = newText(result.textValue & b.textValue)
-  except CatchableError as err:
-    var catchEnv = env.push
-    catchEnv.define(newSymbol("error-message"), newText(err.msg))
+  let left = evaluator.evaluateQuoted(leftExpr, env)
+  if left.kind != Text:
+    raise newSushiError("Native command '++' requires text on the left.")
+  let right = evaluator.evaluateQuoted(rightExpr, env)
+  if right.kind != Text:
+    raise newSushiError("Native command '++' requires text on the right.")
+  result = newText(left.textValue & right.textValue)
 
 proc runCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 1:

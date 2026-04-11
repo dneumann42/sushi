@@ -1,25 +1,91 @@
 use io
+use syntax global
 
-fun doc [blk] do
+var documents {}
+
+fun doc [id blk] do
   var parts #[]
 
   fun p [kv text] do
-    append parts #[:p kv text]
+    append parts #["p" kv text]
   end
 
   fun h [level kv text] do
-    append parts #[("h" ++ [to-string level]) kv text]
+    append parts #["h\(level)" kv text]
+  end
+
+  fun element [tag kv blk] do
+    var parent parts
+    var children #[]
+    set parts children
+    replay blk
+    set parts parent
+    append parts #[tag kv children]
+  end
+
+  fun div [kv blk] do
+    element "div" kv blk
+  end
+
+  fun span [kv blk] do
+    element "span" kv blk
   end
 
   replay blk
 
-  eval parts
+  fun attrs-html-from [entries index] do
+    if (index eq [length entries]) do
+      ""
+    else
+      var entry [eval entries.(index)]
+      var key-node [field entry "key"]
+      var value-node [field entry "value"]
+      " \(field key-node "text")=\"\(field value-node "text")\"\(attrs-html-from entries (index + 1))"
+    end
+  end
+
+  fun attrs-html [kv] do
+    attrs-html-from [field [serialize kv] "entries"] 0
+  end
+
+  fun render-node [node] do
+    var item [eval node]
+    var tag item.(0)
+    var kv item.(1)
+    var body item.(2)
+    var body-node [serialize body]
+
+    if ([field body-node "kind"] eq "sequence") do
+      "<\(tag)\(attrs-html kv)>\(into-html body)</\(tag)>"
+    else
+      "<\(tag)\(attrs-html kv)>\(body)</\(tag)>"
+    end
+  end
+
+  fun into-html-from [xs index] do
+    if (index eq [length xs]) do
+      ""
+    else
+      "\(render-node [eval xs.(index)])\(into-html-from xs (index + 1))"
+    end
+  end
+
+  fun into-html [xs] do
+    into-html-from xs 0
+  end
+
+  set documents.(id) [into-html parts]
 end
 
 var title "World!"
-var d [doc do
-  h 1 {} "Hello, World!"
-  p { class "text-red" } "Hello \(title)"
-end]
 
-io.write-line d
+doc Main do
+  div { class "prose" } do
+    h 1 { } "Hello, World!"
+    span { class "hero" } do
+      p { class "text-red" } "Hello \(title)!"
+    end
+  end
+end
+
+io.write-line documents.(Main)

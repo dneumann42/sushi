@@ -861,6 +861,13 @@ event.kind
     check value.kind == Text
     check value.textValue == "unknown"
 
+  test "concat propagates right-hand evaluation errors":
+    let runtime = newTestRuntime()
+    expect SushiError:
+      discard runtime.evaluate("""
+"h" ++ [to-string 1]
+""")
+
   test "readline inserts text into the middle of the buffer":
     var state = initReadlineState("> ")
     discard state.applyReadlineAction(ReadlineAction(kind: rakInsertText, text: "a"))
