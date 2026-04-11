@@ -39,6 +39,7 @@ type
     precedences: Table[string, int]
     rightAssociative: seq[string]
     unaryOperators: seq[string]
+    postfixBinaryOperators: Table[string, bool]
 
 const
   OperatorChars = {'!', '$', '%', '&', '*', '+', '-', '.', '/', ':', '<', '=', '>', '?', '@', '^', '~'}
@@ -89,6 +90,7 @@ proc initParser(source: SourceFile): Parser =
   }.toTable
   result.rightAssociative = @["^"]
   result.unaryOperators = @["not", "-"]
+  result.postfixBinaryOperators = {"??": true, "!!": true}.toTable
 
 proc tryConsumeLineContinuation(parser: Parser; index: var int): bool
 proc readTextLiteralToken(parser: Parser; index: var int; startPos: int): Token
@@ -653,8 +655,9 @@ proc readExpression(parser: var Parser; minPrecedence: int): Value =
 proc readCommandObject(parser: var Parser; isHead: bool): Value =
   if isHead:
     return parser.readObject()
+  var obj: Value
   if parser.peek.kind == Symbol and parser.peek.lexeme in parser.unaryOperators:
-    var obj = parser.readPrefixExpression()
+    obj = parser.readPrefixExpression()
     while not parser.isAtEnd and parser.check(":"):
       let op = parser.advance
       let nextValue = parser.readNonTupleObject()
@@ -662,7 +665,15 @@ proc readCommandObject(parser: var Parser; isHead: bool): Value =
         raise parserError("Expected value after ':'.", op.span)
       obj = createTupleNode(obj, nextValue, op.span)
     return normalizeTuple(obj)
-  parser.readObject()
+  else:
+    obj = parser.readObject()
+  while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
+    let op = parser.advance
+    let right = parser.readNonTupleObject()
+    if right.isNil:
+      raise parserError("Expected value after '" & op.lexeme & "'.", op.span)
+    obj = newCommand(@[newSymbol(op.lexeme, op.span), obj, right], cover(obj.span, op.span, right.span))
+  obj
 
 proc readObject(parser: var Parser): Value =
   if parser.isAtEnd:
@@ -676,6 +687,12 @@ proc readObject(parser: var Parser): Value =
     if nextValue.isNil:
       raise parserError("Expected value after ':'.", op.span)
     obj = createTupleNode(obj, nextValue, op.span)
+  while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
+    let op = parser.advance
+    let right = parser.readNonTupleObject()
+    if right.isNil:
+      raise parserError("Expected value after '" & op.lexeme & "'.", op.span)
+    obj = newCommand(@[newSymbol(op.lexeme, op.span), obj, right], cover(obj.span, op.span, right.span))
   normalizeTuple(obj)
 
 proc readCommand(parser: var Parser): Value =
