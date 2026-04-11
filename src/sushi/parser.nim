@@ -59,22 +59,10 @@ proc isIdentifierStart(ch: char): bool =
 proc initParser(source: SourceFile): Parser =
   result.source = source
   result.precedences = {
-    ":": 0,
-    "??": 0,
-    "!!": 0,
-    "or": 1,
-    "and": 2,
-    "eq": 3,
-    "not-eq": 3,
-    "<": 4,
-    ">": 4,
-    "+": 5,
-    "-": 5,
-    "*": 6,
-    "/": 6,
-    "%": 6,
-    "^": 7,
-    ".": 8
+    ":": 0, "??": 0, "!!": 0, 
+    "or": 1, "and": 2, "eq": 3, "not-eq": 3, 
+    "<": 4, ">": 4, "+": 5, "-": 5, "*": 6, "/": 6, 
+    "%": 6, "^": 7, ".": 8
   }.toTable
   result.rightAssociative = @["^"]
   result.unaryOperators = @["not", "-"]
@@ -84,37 +72,16 @@ proc tryConsumeLineContinuation(parser: Parser; index: var int): bool
 proc readTextLiteralToken(parser: Parser; index: var int; startPos: int): Token
 
 proc readerReplacementRules(): seq[ReaderReplacementRule] =
+  proc symToken(value: string): Token =
+    Token(kind: Symbol, lexeme: value, span: noneSpan(), textSegments: @[])
+  proc termToken(): Token =
+    Token(kind: Terminator, lexeme: "\n", span: noneSpan(), textSegments: @[])
   @[
-    ReaderReplacementRule(
-      match: @["#["],
-      replacement: @[
-        Token(kind: Symbol, lexeme: "["),
-        Token(kind: Symbol, lexeme: "list")
-      ]),
-    ReaderReplacementRule(
-      match: @["{"],
-      replacement: @[
-        Token(kind: Symbol, lexeme: "["),
-        Token(kind: Symbol, lexeme: "table")
-      ]),
-    ReaderReplacementRule(
-      match: @["}"],
-      replacement: @[
-        Token(kind: Symbol, lexeme: "]")
-      ]),
-    ReaderReplacementRule(
-      match: @["else"],
-      replacement: @[
-        Token(kind: Symbol, lexeme: "end"),
-        Token(kind: Symbol, lexeme: "do")
-      ]),
-    ReaderReplacementRule(
-      match: @["elif"],
-      replacement: @[
-        Token(kind: Symbol, lexeme: "end"),
-        Token(kind: Terminator, lexeme: "\n"),
-        Token(kind: Symbol, lexeme: "if")
-      ])
+    ReaderReplacementRule(match: @["#["], replacement: @[symToken("["), symToken("list")]),
+    ReaderReplacementRule(match: @["{"], replacement: @[symToken("["), symToken("table")]),
+    ReaderReplacementRule(match: @["}"], replacement: @[symToken("]")]),
+    ReaderReplacementRule(match: @["else"], replacement: @[symToken("end"), symToken("do")]),
+    ReaderReplacementRule(match: @["elif"], replacement: @[symToken("end"), termToken(), symToken("if")])
   ]
 
 proc scanComments*(source: SourceFile): seq[CommentTrivia] =
