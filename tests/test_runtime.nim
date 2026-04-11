@@ -564,6 +564,111 @@ var dot-node {
     check tableValue.objects[6].kind == Text
     check tableValue.objects[6].textValue == "."
 
+  test "rewrites double backslashes into implicit blocks":
+    let script = parseScript("""
+doc Main \\
+  div { class "prose" } \\
+    span { class "hero" } \\
+      p { class "text-red" } "Hello"
+""", "<test>")
+    check script.kind == Script
+    check script.commands.len == 1
+
+    let docCommand = script.commands[0]
+    check docCommand.objects.len == 3
+    check docCommand.objects[0].kind == Symbol
+    check docCommand.objects[0].symbolValue == "doc"
+    check docCommand.objects[2].kind == Block
+    check docCommand.objects[2].blockCommands.len == 1
+
+    let divCommand = docCommand.objects[2].blockCommands[0]
+    check divCommand.objects.len == 3
+    check divCommand.objects[0].kind == Symbol
+    check divCommand.objects[0].symbolValue == "div"
+    check divCommand.objects[2].kind == Block
+    check divCommand.objects[2].blockCommands.len == 1
+
+    let spanCommand = divCommand.objects[2].blockCommands[0]
+    check spanCommand.objects.len == 3
+    check spanCommand.objects[0].kind == Symbol
+    check spanCommand.objects[0].symbolValue == "span"
+    check spanCommand.objects[2].kind == Block
+    check spanCommand.objects[2].blockCommands.len == 1
+
+    let paragraph = spanCommand.objects[2].blockCommands[0]
+    check paragraph.objects.len == 3
+    check paragraph.objects[0].kind == Symbol
+    check paragraph.objects[0].symbolValue == "p"
+    check paragraph.objects[2].kind == Text
+    check paragraph.objects[2].textValue == "Hello"
+
+  test "closes implicit blocks on dedent and at eof":
+    let script = parseScript("""
+root \\
+  child
+sibling
+tail \\
+  leaf
+""", "<test>")
+    check script.kind == Script
+    check script.commands.len == 3
+
+    check script.commands[0].objects.len == 2
+    check script.commands[0].objects[0].kind == Symbol
+    check script.commands[0].objects[0].symbolValue == "root"
+    check script.commands[0].objects[1].kind == Block
+    check script.commands[0].objects[1].blockCommands.len == 1
+    check script.commands[0].objects[1].blockCommands[0].objects[0].symbolValue == "child"
+
+    check script.commands[1].objects.len == 1
+    check script.commands[1].objects[0].kind == Symbol
+    check script.commands[1].objects[0].symbolValue == "sibling"
+
+    check script.commands[2].objects.len == 2
+    check script.commands[2].objects[0].kind == Symbol
+    check script.commands[2].objects[0].symbolValue == "tail"
+    check script.commands[2].objects[1].kind == Block
+    check script.commands[2].objects[1].blockCommands.len == 1
+    check script.commands[2].objects[1].blockCommands[0].objects[0].symbolValue == "leaf"
+
+  test "supports inline double-backslash blocks on one line":
+    let script = parseScript("""
+fun into-html [xs] \\ into-html-from xs 0
+""", "<test>")
+    check script.kind == Script
+    check script.commands.len == 1
+    check script.commands[0].objects.len == 4
+    check script.commands[0].objects[0].kind == Symbol
+    check script.commands[0].objects[0].symbolValue == "fun"
+    check script.commands[0].objects[1].kind == Symbol
+    check script.commands[0].objects[1].symbolValue == "into-html"
+    check script.commands[0].objects[2].kind == Command
+    check script.commands[0].objects[3].kind == Block
+    check script.commands[0].objects[3].blockCommands.len == 1
+    check script.commands[0].objects[3].blockCommands[0].objects.len == 3
+    check script.commands[0].objects[3].blockCommands[0].objects[0].kind == Symbol
+    check script.commands[0].objects[3].blockCommands[0].objects[0].symbolValue == "into-html-from"
+
+  test "rejects implicit blocks without an indented body":
+    expect SushiError:
+      discard parseScript("""
+root \\
+next
+""", "<test>")
+
+  test "preserves single-backslash line continuation":
+    let script = parseScript("""
+var ast [syntax.command [list \
+  [syntax.symbol "+"] \
+  [syntax.serialize 20] \
+  [syntax.serialize 22]]]
+""", "<test>")
+    check script.kind == Script
+    check script.commands.len == 1
+    check script.commands[0].objects.len == 3
+    check script.commands[0].objects[0].kind == Symbol
+    check script.commands[0].objects[0].symbolValue == "var"
+
   test "rejects split operator tokens after member access":
     expect SushiError:
       discard parseScript("(a.b + = 1)", "<test>")
@@ -675,6 +780,26 @@ end
     check value.kind == Integer
     check value.intValue == 2
 
+  test "supports implicit blocks at runtime":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var total 0
+do-times 4 \\
+  set total [+ total it]
+eval total
+""")
+    check value.kind == Integer
+    check value.intValue == 6
+
+  test "supports inline implicit blocks at runtime":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun inc [x] \\ + x 1
+inc 41
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
   test "supports command-at on captured blocks":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -771,6 +896,25 @@ end
   test "runs shipped prose script":
     let runtime = newTestRuntime()
     let value = runtime.runFile(getCurrentDir() / "scripts" / "prose.sushi")
+    check value.kind != Text or not value.textValue.startsWith("error:")
+
+  test "loads pen script and returns rendered html":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluateFile(getCurrentDir() / "scripts" / "pen.sushi")
+    check value.kind == Text
+    check "<html lang=\"en\">" in value.textValue
+    check "<title>Pen DSL Demo</title>" in value.textValue
+    check "<img" in value.textValue
+    check "src=\"/hero.png\"" in value.textValue
+    check "alt=\"Pen demo screenshot\"" in value.textValue
+    check "class=\"hero-image\"" in value.textValue
+    check "<meta" in value.textValue
+    check "<link" in value.textValue
+    check "<footer class=\"page-footer\"><small>Built with pen.sushi and the Sushi runtime.</small></footer>" in value.textValue
+
+  test "runs shipped pen script":
+    let runtime = newTestRuntime()
+    let value = runtime.runFile(getCurrentDir() / "scripts" / "pen.sushi")
     check value.kind != Text or not value.textValue.startsWith("error:")
 
   test "parses printable terminal input":

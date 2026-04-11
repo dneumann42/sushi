@@ -34,6 +34,7 @@ template           = "\(" , template-source , ")" ;
 comment            = ";" , { any-char - newline } ;
 terminator         = newline ;
 line-continuation  = "\" , { " " | "\t" } , [ comment ] , newline ;
+implicit-block     = "\" , "\" ;
 ```
 
 Notes:
@@ -43,7 +44,9 @@ Notes:
 - `#[` tokenizes as a distinct symbol token and is then rewritten by the reader to `[` `list`.
 - `{` and `}` tokenize as symbol tokens and are then rewritten by the reader to `[` `table` and `]`.
 - Text interpolation uses `\(... )`, and the embedded source is parsed as Sushi syntax.
-- A backslash only has meaning for line continuation or inside text literals.
+- A single backslash only has meaning for line continuation or inside text literals.
+- A literal `\\` token is handled in a dedicated post-tokenization reader phase and may
+  expand to `do` / `end` tokens based on indentation.
 
 ## Grammar
 
@@ -207,7 +210,15 @@ This absorption is only allowed when the lhs is:
 
 ### Reader replacements
 
-Before parsing, the reader rewrites exact symbol-token sequences. Current built-in rules include:
+Before parsing, the reader performs two rewrite phases:
+
+1. A `\\` rewrite pass:
+   - a trailing `\\` token rewrites to `do` and inserts matching `end` tokens when later
+     non-blank, non-comment lines dedent; the next real line after `\\` must be indented
+     with a raw whitespace prefix that strictly extends the opener line.
+   - an inline `\\` with more tokens later on the same line rewrites to `do ... end`
+     around the remainder of that line.
+2. Exact symbol-token replacements. Current built-in rules include:
 
 ```text
 #[   => [ list
@@ -218,6 +229,38 @@ elif => end \n if
 ```
 
 So `#[1 2]` is parsed through the normal bracket-command path as `[list 1 2]`, and `{a 1}` is parsed as `[table a 1]`, not through dedicated list/table literal grammar rules.
+
+Example:
+
+```text
+doc Main \\
+  div { class "prose" } \\
+    p { } "Hello"
+```
+
+is rewritten before parsing as:
+
+```text
+doc Main do
+  div { class "prose" } do
+    p { } "Hello"
+  end
+end
+```
+
+and:
+
+```text
+fun into-html [xs] \\ into-html-from xs 0
+```
+
+is rewritten before parsing as:
+
+```text
+fun into-html [xs] do
+  into-html-from xs 0
+end
+```
 
 ### Text literals are not operators
 

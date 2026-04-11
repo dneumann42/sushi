@@ -45,6 +45,19 @@ type
     match: seq[string]
     replacement: seq[Token]
 
+  ImplicitBlock = object
+    indent: string
+    opener: Token
+    hasBody: bool
+
+  PhysicalLine = object
+    indent: string
+    startPos: int
+    tokenStart: int
+    tokenEnd: int
+    lastCodeToken: int
+    hasCode: bool
+
 const
   OperatorChars = {'!', '$', '%', '&', '*', '+', '-', '.', '/', ':', '<', '=', '>', '?', '@', '^', '~'}
   SingleCharacterSymbols = {'{', '}', '(', ')', '[', ']'}
@@ -131,6 +144,102 @@ proc addToken(parser: var Parser; kind: TokenKind; lexeme: string; startPos, end
 
 proc newReplacementToken(kind: TokenKind; lexeme: string; span: SourceSpan): Token =
   Token(kind: kind, lexeme: lexeme, span: span, textSegments: @[])
+
+proc lineIndent(source: SourceFile; line: int): string =
+  if line < 1 or line > source.lineStarts.len:
+    return ""
+  var index = source.lineStarts[line - 1]
+  while index < source.len and source.text[index] in {' ', '\t'}:
+    inc index
+  source.text[source.lineStarts[line - 1] ..< index]
+
+proc buildPhysicalLines(parser: Parser): seq[PhysicalLine] =
+  result = newSeq[PhysicalLine](parser.source.lineStarts.len)
+  for lineIndex in 0 ..< result.len:
+    result[lineIndex] = PhysicalLine(
+      indent: parser.source.lineIndent(lineIndex + 1),
+      startPos: parser.source.lineStarts[lineIndex],
+      tokenStart: -1,
+      tokenEnd: -1,
+      lastCodeToken: -1,
+      hasCode: false
+    )
+
+  for tokenIndex, token in parser.tokens:
+    let line = token.span.startLocation.line - 1
+    if line < 0 or line >= result.len:
+      continue
+    if result[line].tokenStart < 0:
+      result[line].tokenStart = tokenIndex
+    result[line].tokenEnd = tokenIndex
+    if token.kind != Terminator:
+      result[line].hasCode = true
+      result[line].lastCodeToken = tokenIndex
+
+proc isStrictIndentedChild(childIndent, parentIndent: string): bool =
+  childIndent.len > parentIndent.len and childIndent.startsWith(parentIndent)
+
+proc applyIndentedBlockRewrites(parser: var Parser) =
+  if parser.tokens.len == 0:
+    return
+
+  let source = parser.source
+  let lines = parser.buildPhysicalLines()
+  var rewritten: seq[Token]
+  var stack: seq[ImplicitBlock]
+
+  proc closeImplicitBlocks(span: SourceSpan) =
+    while stack.len > 0:
+      rewritten.add(newReplacementToken(Symbol, "end", span))
+      discard stack.pop()
+
+  proc closeImplicitBlocksBeforeLine(line: PhysicalLine): bool =
+    result = false
+    while stack.len > 0:
+      let top = stack[^1]
+      if not top.hasBody:
+        if line.indent.isStrictIndentedChild(top.indent):
+          stack[^1].hasBody = true
+          break
+        raise parserError("Implicit '\\\\' block requires an indented body.", top.opener.span)
+      if line.indent.isStrictIndentedChild(top.indent):
+        break
+      rewritten.add(newReplacementToken(Symbol, "end", sourceSpan(source, line.startPos, line.startPos)))
+      discard stack.pop()
+      result = true
+
+  for line in lines:
+    if line.hasCode:
+      if closeImplicitBlocksBeforeLine(line):
+        rewritten.add(newReplacementToken(Terminator, "\n", sourceSpan(source, line.startPos, line.startPos)))
+
+    if line.tokenStart < 0:
+      continue
+
+    var inlineBlockCount = 0
+    for tokenIndex in line.tokenStart .. line.tokenEnd:
+      let token = parser.tokens[tokenIndex]
+      if token.kind == Terminator and inlineBlockCount > 0:
+        let closeSpan = sourceSpan(source, token.span.start, token.span.start)
+        for _ in 0 ..< inlineBlockCount:
+          rewritten.add(newReplacementToken(Symbol, "end", closeSpan))
+        inlineBlockCount = 0
+      if token.kind == Symbol and token.lexeme == "\\\\":
+        rewritten.add(newReplacementToken(Symbol, "do", token.span))
+        if tokenIndex == line.lastCodeToken:
+          stack.add(ImplicitBlock(indent: line.indent, opener: token, hasBody: false))
+        else:
+          inc inlineBlockCount
+        continue
+      rewritten.add(token)
+
+    if inlineBlockCount > 0:
+      let closeSpan = sourceSpan(source, parser.tokens[line.lastCodeToken].span.finish, parser.tokens[line.lastCodeToken].span.finish)
+      for _ in 0 ..< inlineBlockCount:
+        rewritten.add(newReplacementToken(Symbol, "end", closeSpan))
+
+  closeImplicitBlocks(sourceSpan(source, source.len, source.len))
+  parser.tokens = rewritten
 
 proc skipNestedString(parser: Parser; index: var int) =
   while index < parser.source.len:
@@ -268,6 +377,10 @@ proc tokenize(parser: var Parser) =
   while index < source.len:
     let ch = source[index]
     if ch == '\\':
+      if index + 1 < source.len and source[index + 1] == '\\':
+        parser.addToken(Symbol, "\\\\", index, index + 2)
+        index += 2
+        continue
       if parser.tryConsumeLineContinuation(index):
         continue
       raise parserError("Unsupported character '\\'.", parser.span(index, index + 1))
@@ -762,6 +875,7 @@ proc readScript(parser: var Parser): Value =
 proc parseScript*(source: SourceFile): Value =
   var parser = initParser(source)
   parser.tokenize()
+  parser.applyIndentedBlockRewrites()
   parser.applyReaderReplacements()
   parser.readScript()
 

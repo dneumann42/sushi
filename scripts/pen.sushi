@@ -6,33 +6,6 @@ var documents {}
 fun doc [id blk] do
   var parts #[]
 
-  fun p [kv text] do
-    append parts #["p" kv text]
-  end
-
-  fun h [level kv text] do
-    append parts #["h\(level)" kv text]
-  end
-
-  fun element [tag kv blk] do
-    var parent parts
-    var children #[]
-    set parts children
-    replay blk
-    set parts parent
-    append parts #[tag kv children]
-  end
-
-  fun div [kv blk] do
-    element "div" kv blk
-  end
-
-  fun span [kv blk] do
-    element "span" kv blk
-  end
-
-  replay blk
-
   fun attrs-html-from [entries index] do
     if (index eq [length entries]) do
       ""
@@ -44,21 +17,77 @@ fun doc [id blk] do
     end
   end
 
-  fun attrs-html [kv] do
+  fun attrs-html [kv] \\
     attrs-html-from [field [serialize kv] "entries"] 0
+
+  fun text-element [tag kv text] \\
+    append parts #[tag kv text]
+
+  fun h [level kv text] \\
+    text-element "h\(level)" kv text
+
+  fun element [tag kv blk] do
+    var parent parts
+    var children #[]
+    set parts children
+    replay blk
+    set parts parent
+    append parts #[tag kv children]
   end
+
+  fun void-element [tag kv] \\
+    append parts #[tag kv ""]
+
+  fun html [kv blk] \\ element "html" kv blk
+  fun head [kv blk] \\ element "head" kv blk
+  fun body [kv blk] \\ element "body" kv blk
+  fun header [kv blk] \\ element "header" kv blk
+  fun main [kv blk] \\ element "main" kv blk
+  fun footer [kv blk] \\ element "footer" kv blk
+  fun section [kv blk] \\ element "section" kv blk
+  fun article [kv blk] \\ element "article" kv blk
+  fun nav [kv blk] \\ element "nav" kv blk
+  fun div [kv blk] \\ element "div" kv blk
+  fun span [kv blk] \\ element "span" kv blk
+  fun ul [kv blk] \\ element "ul" kv blk
+  fun ol [kv blk] \\ element "ol" kv blk
+
+  fun title-tag [kv text] \\ text-element "title" kv text
+  fun p [kv text] \\ text-element "p" kv text
+  fun strong [kv text] \\ text-element "strong" kv text
+  fun em [kv text] \\ text-element "em" kv text
+  fun small [kv text] \\ text-element "small" kv text
+  fun a [kv text] \\ text-element "a" kv text
+  fun button [kv text] \\ text-element "button" kv text
+  fun li [kv text] \\ text-element "li" kv text
+  fun h1 [kv text] \\ h 1 kv text
+  fun h2 [kv text] \\ h 2 kv text
+  fun h3 [kv text] \\ h 3 kv text
+  fun h4 [kv text] \\ h 4 kv text
+  fun h5 [kv text] \\ h 5 kv text
+  fun h6 [kv text] \\ h 6 kv text
+
+  fun img [kv] \\ void-element "img" kv
+  fun br [kv] \\ void-element "br" kv
+  fun hr [kv] \\ void-element "hr" kv
+  fun meta [kv] \\ void-element "meta" kv
+  fun link [kv] \\ void-element "link" kv
+
+  replay blk
 
   fun render-node [node] do
     var item [eval node]
     var tag item.(0)
     var kv item.(1)
     var body item.(2)
+    var tag-node [serialize tag]
+    var tag-text [field tag-node "text"]
     var body-node [serialize body]
 
     if ([field body-node "kind"] eq "sequence") do
-      "<\(tag)\(attrs-html kv)>\(into-html body)</\(tag)>"
+      "<\(tag-text)\(attrs-html kv)>\(into-html body)</\(tag-text)>"
     else
-      "<\(tag)\(attrs-html kv)>\(body)</\(tag)>"
+      "<\(tag-text)\(attrs-html kv)>\(body)</\(tag-text)>"
     end
   end
 
@@ -70,22 +99,48 @@ fun doc [id blk] do
     end
   end
 
-  fun into-html [xs] do
-    into-html-from xs 0
-  end
+  fun into-html [xs] \\ into-html-from xs 0
 
   set documents.(id) [into-html parts]
 end
 
-var title "World!"
+var page-title "Pen DSL Demo"
+var hero-name "World"
 
-doc Main do
-  div { class "prose" } do
-    h 1 { } "Hello, World!"
-    span { class "hero" } do
-      p { class "text-red" } "Hello \(title)!"
-    end
-  end
-end
+doc Main \\
+  html { lang "en" } \\
+    head { } \\
+      meta { charset "utf-8" }
+      meta { name "viewport" content "width=device-width, initial-scale=1" }
+      title-tag { } page-title
+      link { rel "stylesheet" href "/pen.css" }
+    body { class "page-shell" } \\
+      header { class "hero" } \\
+        nav { class "hero-nav" } \\
+          a { href "/" class "brand" } "pen"
+          a { href "/docs" class "nav-link" } "Docs"
+          a { href "/examples" class "nav-link" } "Examples"
+        h1 { class "hero-title" } "Hello, \(hero-name)!"
+        p { class "hero-copy" } "A tiny Sushi DSL can still render a whole page."
+        button { class "primary-action" } "Render demo"
+      main { class "content-grid" } \\
+        section { class "intro card" } \\
+          h2 { } "What it supports"
+          p { } "Named helpers for common tags, inline text nodes, and indentation-driven blocks."
+          ul { class "feature-list" } \\
+            li { } "semantic layout helpers"
+            li { } "list and link helpers"
+            li { } "void tags like meta, link, img, and hr"
+        section { class "media card" } \\
+          h2 { } "Example media"
+          img { src "/hero.png" alt "Pen demo screenshot" class "hero-image" }
+          hr { class "section-rule" }
+          p { } "The renderer now understands common HTML void elements."
+        article { class "notes card" } \\
+          h2 { } "Notes"
+          p { } "Keep the DSL small, but make the example feel like a real document."
+      footer { class "page-footer" } \\
+        small { } "Built with pen.sushi and the Sushi runtime."
 
 io.write-line documents.(Main)
+documents.(Main)
