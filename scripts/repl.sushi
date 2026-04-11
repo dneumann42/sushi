@@ -1,4 +1,5 @@
 use io
+use syntax global
 use terminal global
 
 class HistoryNode [] do
@@ -97,10 +98,15 @@ end
         if (self.current-line eq ":history") do
             self.history.print
         end do
-            var result [run self.current-line] ?? do
+            catch do
+                let form [capture-source self.current-line] do
+                    var result [run self.current-line]
+                    set _ form
+                    io.write-line [raw result]
+                end
+            end do
               io.write-error-line error-message
             end
-            io.write-line result
         end
     end
     

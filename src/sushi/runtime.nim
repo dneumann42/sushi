@@ -157,6 +157,15 @@ proc evaluateScript*(evaluator: Evaluator; script: Value; env: Env): Value =
   for command in script.commands:
     result = evaluator.evaluate(command, env)
 
+proc topLevelSourceValue(source: SourceFile): Value =
+  let script = parseScript(source)
+  if script.commands.len == 1:
+    let command = script.commands[0]
+    if command.kind == Command and command.objects.len == 1:
+      return command.objects[0]
+    return command
+  script
+
 proc evaluateBlock*(evaluator: Evaluator; blockValue: Value; env: Env): Value =
   result = newNilValue()
   for command in blockValue.blockCommands:
@@ -950,6 +959,14 @@ proc captureCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
       return existing
   newCapturedSyntax(args[0], env)
 
+proc captureSourceCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 1:
+    raise newSushiError("Native command 'capture-source' requires exactly one argument.")
+  let source = evaluator.evaluateQuoted(args[0], env)
+  if source.kind != Text:
+    raise newSushiError("Native command 'capture-source' expects text.")
+  newCapturedSyntax(topLevelSourceValue(newSourceFile("<input>", source.textValue)), env)
+
 proc replayCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 1:
     raise newSushiError("Native command 'replay' requires exactly one argument.")
@@ -1399,6 +1416,7 @@ proc bindNativeCommands(env: Env) =
     ("eval-value", evalValueCommand),
     ("raw", rawCommand),
     ("capture", captureCommand),
+    ("capture-source", captureSourceCommand),
     ("replay", replayCommand),
     ("eq", eqCommand),
     ("not", notCommand),

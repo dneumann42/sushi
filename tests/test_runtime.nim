@@ -628,10 +628,49 @@ answer
     check "> 7" in output
     check "bye" in output
 
+  test "repl exposes the previous quoted form through underscore":
+    buildBinary()
+    let result = runBinaryWithInput("(1 + 2)\neval _\n:quit\n")
+    let output = stripAnsi(result.output)
+    check result.exitCode == 0
+    check "Sushi REPL" in output
+    check "> + 1 2" in output
+    check "> 3" in output
+    check "bye" in output
+
+  test "repl keeps underscore after a failed command":
+    buildBinary()
+    let result = runBinaryWithInput("(1 + 2)\nunknown 1\neval _\n:quit\n")
+    let output = stripAnsi(result.output)
+    check result.exitCode == 0
+    check "> + 1 2" in output
+    check "Unknown command: unknown" in output
+    check "> 3" in output
+    check "bye" in output
+
+  test "repl can eval underscore repeatedly":
+    buildBinary()
+    let result = runBinaryWithInput("(1 + 2)\neval _\neval _\n:quit\n")
+    let output = stripAnsi(result.output)
+    check result.exitCode == 0
+    check "> + 1 2" in output
+    check output.count("> 3") == 2
+    check "bye" in output
+
   test "repl initializes underscore before the first command":
     buildBinary()
     let result = runBinaryWithInput("table \"v\" _\n:quit\n")
     let output = stripAnsi(result.output)
     check result.exitCode == 0
     check "{\"v\" }" in output
+    check "bye" in output
+
+  test "repl prints block results without re-executing them":
+    buildBinary()
+    let result = runBinaryWithInput("do 1 2 3 end\n+ 1 2\n:quit\n")
+    let output = stripAnsi(result.output)
+    check result.exitCode == 0
+    check "commandKind head must be a symbol, got 1." notin output
+    check "do" in output
+    check "> 3" in output
     check "bye" in output
