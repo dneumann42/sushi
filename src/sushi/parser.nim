@@ -494,6 +494,11 @@ proc isOperatorSuffixToken(token: Token): bool =
     return false
   token.lexeme.allIt(it in OperatorChars)
 
+proc startsObjectLikeSymbol(lexeme: string): bool =
+  lexeme in ["[", "(", "do", "fn"] or
+    (lexeme.len > 0 and isIdentifierStart(lexeme[0])) or
+    (lexeme.len > 1 and lexeme[0] == ':' and isIdentifierStart(lexeme[1]))
+
 proc hasAttachedOperatorSuffix(lexeme: string): bool =
   if lexeme.len == 0 or not isIdentifierStart(lexeme[0]):
     return false
@@ -568,7 +573,15 @@ proc readPrefixExpression(parser: var Parser): Value =
 proc readParenthesizedExpression(parser: var Parser): Value =
   let openTok = parser.expect("(", "Expected '(' to start expression")
   let expression = parser.readExpression(0)
-  let closeTok = parser.expect(")", "Unbalanced parenthesis", openTok.span)
+  if not parser.check(")"):
+    if not parser.isAtEnd:
+      let nextTok = parser.peek
+      raise parserError(
+        "Parentheses only group expressions; use brackets for command invocation like [to-string x].",
+        cover(openTok.span, nextTok.span)
+      )
+    raise parserError("Unbalanced parenthesis", openTok.span)
+  let closeTok = parser.advance
   normalizeTuple(withSpan(expression, cover(openTok.span, expression.span, closeTok.span)))
 
 proc readDotRight(parser: var Parser; dotSpan: SourceSpan): Value =
@@ -678,6 +691,9 @@ proc readExpression(parser: var Parser; minPrecedence: int): Value =
     if parser.peek.kind != Symbol:
       break
     let op = parser.peek.lexeme
+    if not parser.precedences.hasKey(op) and not parser.postfixBinaryOperators.hasKey(op) and
+        op != ":" and startsObjectLikeSymbol(op):
+      break
     var precedence: int
     if not parser.tryGetInfixPrecedence(op, precedence):
       break

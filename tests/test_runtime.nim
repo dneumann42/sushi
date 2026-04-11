@@ -568,6 +568,14 @@ var dot-node {
     expect SushiError:
       discard parseScript("(a.b + = 1)", "<test>")
 
+  test "rejects parenthesized command invocation with guidance":
+    try:
+      discard parseScript("(to-string x)", "<test>")
+      fail()
+    except SushiError as err:
+      check err.msg.contains("Parentheses only group expressions")
+      check err.msg.contains("[to-string x]")
+
   test "supports spaced member operator suffixes at runtime":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
