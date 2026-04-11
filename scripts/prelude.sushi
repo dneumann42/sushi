@@ -53,9 +53,19 @@ end
 fun record-set-command [field-node value-node] do
     var field [eval field-node]
     var value [eval value-node]
+    var field-name [syntax.text field]
+    var dot-node [table \
+        "kind" "symbol" \
+        "render" "." \
+        "text" "." \
+        "start" 0 \
+        "finish" 0 \
+        "leading-comments" #[] \
+        "trailing-comments" #[]]
+    var target [syntax.command [list dot-node [syntax.symbol "self"] [syntax.symbol field-name]]]
     syntax.command [list \
         [syntax.symbol "set"] \
-        [syntax.member-access [syntax.symbol "self"] [syntax.text field]] \
+        target \
         value]
 end
 

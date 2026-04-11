@@ -151,16 +151,6 @@ proc deserializeNode(node: Value): Value =
     newSequence(deserializeNodes(tableNode, "items", commandName))
   of "table":
     newTable(deserializeTableEntries(tableNode, commandName))
-  of "member-access":
-    newMemberAccess(
-      deserializeNode(getField(tableNode, "receiver", commandName)),
-      requireText(getField(tableNode, "member-name", commandName), commandName)
-    )
-  of "indexed-access":
-    newIndexedAccess(
-      deserializeNode(getField(tableNode, "receiver", commandName)),
-      deserializeNode(getField(tableNode, "index", commandName))
-    )
   of "string-template":
     newStringTemplate(deserializeTemplateSegments(tableNode, commandName))
   of "symbol":
@@ -258,16 +248,6 @@ proc serializeNode(node: Value; comments: seq[CommentTrivia] = @[];
       entryValues.add(serializeEntry(keys[i], values[i], spans[i], attached.leading[i], attached.trailing[i]))
     entries.put("suffix-comments", commentListValue(attached.suffix))
     entries.put("entries", newSequence(entryValues))
-    newTable(entries)
-  of MemberAccess:
-    var entries = baseNode("member-access", node, leading, trailing)
-    entries.put("receiver", serializeNode(node.receiver))
-    entries.put("member-name", newText(node.memberName))
-    newTable(entries)
-  of IndexedAccess:
-    var entries = baseNode("indexed-access", node, leading, trailing)
-    entries.put("receiver", serializeNode(node.indexedReceiver))
-    entries.put("index", serializeNode(node.indexValue))
     newTable(entries)
   of StringTemplate:
     var entries = baseNode("string-template", node, leading, trailing)
@@ -878,20 +858,6 @@ proc buildSyntaxModule*(): NativeModuleDefinition =
       "trailing-comments": newSequence(@[]),
       "suffix-comments": newSequence(@[]),
       "commands": newSequence(commands)
-    }))
-
-  discard builder.command("member-access", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
-    if args.len != 2:
-      raise newException(ValueError, "'member-access' expects a receiver node and a member name.")
-    newTableValue({
-      "kind": newText("member-access"),
-      "render": newText(""),
-      "start": newInteger(0),
-      "finish": newInteger(0),
-      "leading-comments": newSequence(@[]),
-      "trailing-comments": newSequence(@[]),
-      "receiver": requireTable(evaluator.evaluateQuoted(args[0], env), "member-access"),
-      "member-name": newText(requireText(evaluator.evaluateQuoted(args[1], env), "member-access"))
     }))
 
   discard builder.command("eval-node", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =

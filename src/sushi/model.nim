@@ -15,8 +15,6 @@ type
     Command
     Script
     Block
-    MemberAccess
-    IndexedAccess
     Array
     Module
     Class
@@ -55,12 +53,6 @@ type
       commands*: seq[Value]
     of Block:
       blockCommands*: seq[Value]
-    of MemberAccess:
-      receiver*: Value
-      memberName*: string
-    of IndexedAccess:
-      indexedReceiver*: Value
-      indexValue*: Value
     of Array:
       elements*: seq[Value]
       arity*: int
@@ -200,12 +192,6 @@ proc newScript*(commands: seq[Value]; span = noneSpan()): Value =
 proc newBlock*(commands: seq[Value]; span = noneSpan()): Value =
   new(result)
   result[] = ValueObj(kind: Block, span: span, blockCommands: commands)
-proc newMemberAccess*(receiver: Value; memberName: string; span = noneSpan()): Value =
-  new(result)
-  result[] = ValueObj(kind: MemberAccess, span: span, receiver: receiver, memberName: memberName)
-proc newIndexedAccess*(receiver, indexValue: Value; span = noneSpan()): Value =
-  new(result)
-  result[] = ValueObj(kind: IndexedAccess, span: span, indexedReceiver: receiver, indexValue: indexValue)
 proc newArray*(elements: seq[Value]; arity: int; span = noneSpan()): Value =
   new(result)
   result[] = ValueObj(kind: Array, span: span, elements: elements, arity: arity)
@@ -350,10 +336,6 @@ proc `==`*(a, b: Value): bool =
       if a.blockCommands[i] != b.blockCommands[i]:
         return false
     true
-  of MemberAccess:
-    a.receiver == b.receiver and a.memberName == b.memberName
-  of IndexedAccess:
-    a.indexedReceiver == b.indexedReceiver and a.indexValue == b.indexValue
   of Array:
     if a.arity != b.arity or a.elements.len != b.elements.len:
       return false
@@ -404,12 +386,6 @@ proc hash*(value: Value): Hash =
   of Block:
     for cmd in value.blockCommands:
       result = result !& hash(cmd)
-  of MemberAccess:
-    result = result !& hash(value.receiver)
-    result = result !& hash(value.memberName)
-  of IndexedAccess:
-    result = result !& hash(value.indexedReceiver)
-    result = result !& hash(value.indexValue)
   of Array:
     result = result !& hash(value.arity)
     for item in value.elements:

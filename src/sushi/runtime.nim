@@ -6,6 +6,9 @@ import parser
 
 var ctorCallCount* = 0
 
+const
+  DotIndexMarker = ":dot-index"
+
 type
   ResolvedValue = object
     value: Value
@@ -15,11 +18,24 @@ type
 proc formatValue*(value: Value): string
 proc evaluate*(evaluator: Evaluator; value: Value; env: Env): Value
 proc evaluateQuoted*(evaluator: Evaluator; value: Value; env: Env): Value
-proc evaluateMemberAccess*(evaluator: Evaluator; memberAccess: Value; args: seq[Value]; env: Env): Value
-proc evaluateIndexedAccess*(evaluator: Evaluator; indexedAccess: Value; env: Env): Value
 proc invokeValue*(value: Value; evaluator: Evaluator; env: Env; args: seq[Value]): Value
 proc has*(env: Env; name: Value): bool
 proc find*(env: Env; name: Value): Value
+
+proc isDotIndexMarker(value: Value): bool =
+  value.kind == Command and value.objects.len == 2 and value.objects[0].kind == Symbol and
+    value.objects[0].symbolValue == DotIndexMarker
+
+proc isDotAccessCommand(value: Value): bool =
+  value.kind == Command and value.objects.len == 3 and value.objects[0].kind == Symbol and
+    value.objects[0].symbolValue == "."
+
+proc formatDotAccess(value: Value): string =
+  let receiver = formatValue(value.objects[1])
+  let accessor = value.objects[2]
+  if accessor.isDotIndexMarker:
+    return receiver & ".(" & formatValue(accessor.objects[1]) & ")"
+  receiver & "." & formatValue(accessor)
 
 proc captureArgument(arg: Value; env: Env): Value =
   if arg.kind == Symbol and env.has(arg):
@@ -270,12 +286,11 @@ proc formatValue*(value: Value): string =
       parts.add(formatValue(key))
       parts.add(formatValue(item))
     "{" & parts.join(" ") & "}"
-  of MemberAccess:
-    formatValue(value.receiver) & "." & value.memberName
-  of IndexedAccess:
-    formatValue(value.indexedReceiver) & ".(" & formatValue(value.indexValue) & ")"
   of Command:
-    value.objects.map(formatValue).join(" ")
+    if value.isDotAccessCommand:
+      formatDotAccess(value)
+    else:
+      value.objects.map(formatValue).join(" ")
   of Script:
     value.commands.map(formatValue).filterIt(it.len > 0).join("\n")
   of Block:
@@ -321,22 +336,6 @@ proc evaluateArrayIndex(arrayValue, index: Value): Value =
   if index.intValue < 0 or index.intValue >= arrayValue.elements.len:
     raise newSushiError("arrayKind index " & $index.intValue & " out of range.")
   arrayValue.elements[index.intValue]
-
-proc evaluateIndexedAccess*(evaluator: Evaluator; indexedAccess: Value; env: Env): Value =
-  try:
-    let receiver = evaluator.evaluateQuoted(indexedAccess.indexedReceiver, env)
-    let indexValue = evaluator.evaluateQuoted(indexedAccess.indexValue, env)
-    case receiver.kind
-    of Table:
-      evaluateTableIndex(receiver, indexValue)
-    of Sequence:
-      evaluateSequenceIndex(receiver, indexValue)
-    of Array:
-      evaluateArrayIndex(receiver, indexValue)
-    else:
-      raise newSushiError("objectSegment " & formatValue(receiver) & " does not support indexing.")
-  except CatchableError as err:
-    raise wrapSushiError(err, indexedAccess.span)
 
 proc invokeMethod(mdef: MethodDef; evaluator: Evaluator; classDef: ClassDef; args: seq[Value];
     callerEnv: Env = nil): Value =
@@ -408,6 +407,50 @@ proc invokeMethod(mdef: MethodDef; evaluator: Evaluator; instance: instanceKind;
         callEnv.define(paramName, value)
   evaluator.evaluateBlock(mdef.body, callEnv)
 
+proc evaluateDotAccess(evaluator: Evaluator; dotAccess: Value; args: seq[Value]; env: Env): Value =
+  if not dotAccess.isDotAccessCommand:
+    raise newSushiError("Invalid dot access.")
+  let receiver = evaluator.evaluateQuoted(dotAccess.objects[1], env)
+  let accessor = dotAccess.objects[2]
+  try:
+    if accessor.isDotIndexMarker:
+      let indexValue = evaluator.evaluateQuoted(accessor.objects[1], env)
+      case receiver.kind
+      of Table:
+        return evaluateTableIndex(receiver, indexValue)
+      of Sequence:
+        return evaluateSequenceIndex(receiver, indexValue)
+      of Array:
+        return evaluateArrayIndex(receiver, indexValue)
+      else:
+        raise newSushiError("objectSegment " & formatValue(receiver) & " does not support indexing.")
+    if accessor.kind != Symbol:
+      raise newSushiError("Dot access expects a member name or grouped index.")
+    case receiver.kind
+    of Module:
+      let exported = receiver.getExport(accessor.symbolValue)
+      if args.len == 0 and not exported.isCallable:
+        return exported
+      invokeValue(exported, evaluator, env, args)
+    of Instance:
+      if args.len == 0 and receiver.instanceDef.hasField(accessor.symbolValue):
+        return receiver.instanceDef.getField(accessor.symbolValue)
+      let mdef = receiver.instanceDef.class.getInstanceMethod(accessor.symbolValue)
+      if mdef.isNil:
+        raise newSushiError("methodKind " & receiver.instanceDef.class.name & "." & accessor.symbolValue & " is not defined.")
+      invokeMethod(mdef, evaluator, receiver.instanceDef, args, env)
+    of Class:
+      let mdef = receiver.classDef.getClassMethod(accessor.symbolValue)
+      if mdef.isNil:
+        raise newSushiError("classKind method " & receiver.classDef.name & "." & accessor.symbolValue & " is not defined.")
+      if args.len == 0:
+        return newMethodValue(mdef)
+      invokeMethod(mdef, evaluator, receiver.classDef, args, env)
+    else:
+      raise newSushiError("objectSegment " & formatValue(receiver) & " does not support member access.")
+  except CatchableError as err:
+    raise wrapSushiError(err, dotAccess.span)
+
 proc invokeValue*(value: Value; evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   case value.kind
   of NativeCommand:
@@ -442,54 +485,6 @@ proc invokeValue*(value: Value; evaluator: Evaluator; env: Env; args: seq[Value]
   else:
     raise newSushiError("objectSegment " & formatValue(value) & " is not invokable.")
 
-proc resolveDirectMember(receiver: Value; memberName: string): Value =
-  case receiver.kind
-  of Module:
-    receiver.getExport(memberName)
-  of Instance:
-    if receiver.instanceDef.hasField(memberName):
-      receiver.instanceDef.getField(memberName)
-    else:
-      let mdef = receiver.instanceDef.class.getInstanceMethod(memberName)
-      if mdef.isNil:
-        raise newSushiError("Member " & memberName & " is not defined.")
-      newMethodValue(mdef)
-  of Class:
-    let mdef = receiver.classDef.getClassMethod(memberName)
-    if mdef.isNil:
-      raise newSushiError("Member " & memberName & " is not defined.")
-    newMethodValue(mdef)
-  else:
-    raise newSushiError("Member " & memberName & " is not defined.")
-
-proc evaluateMemberAccess*(evaluator: Evaluator; memberAccess: Value; args: seq[Value]; env: Env): Value =
-  try:
-    let receiver = evaluator.evaluateQuoted(memberAccess.receiver, env)
-    case receiver.kind
-    of Module:
-      let exported = receiver.getExport(memberAccess.memberName)
-      if args.len == 0 and not exported.isCallable:
-        return exported
-      invokeValue(exported, evaluator, env, args)
-    of Instance:
-      if args.len == 0 and receiver.instanceDef.hasField(memberAccess.memberName):
-        return receiver.instanceDef.getField(memberAccess.memberName)
-      let mdef = receiver.instanceDef.class.getInstanceMethod(memberAccess.memberName)
-      if mdef.isNil:
-        raise newSushiError("methodKind " & receiver.instanceDef.class.name & "." & memberAccess.memberName & " is not defined.")
-      invokeMethod(mdef, evaluator, receiver.instanceDef, args, env)
-    of Class:
-      let mdef = receiver.classDef.getClassMethod(memberAccess.memberName)
-      if mdef.isNil:
-        raise newSushiError("classKind method " & receiver.classDef.name & "." & memberAccess.memberName & " is not defined.")
-      if args.len == 0:
-        return newMethodValue(mdef)
-      invokeMethod(mdef, evaluator, receiver.classDef, args, env)
-    else:
-      raise newSushiError("objectSegment " & formatValue(receiver) & " does not support member access.")
-  except CatchableError as err:
-    raise wrapSushiError(err, memberAccess.span)
-
 proc evaluateQuoted*(evaluator: Evaluator; value: Value; env: Env): Value =
   case value.kind
   of CapturedSyntax:
@@ -500,12 +495,11 @@ proc evaluateQuoted*(evaluator: Evaluator; value: Value; env: Env): Value =
     if value.span.isEmpty: value else: cloneLiteralTable(value)
   of StringTemplate:
     evaluateStringTemplate(evaluator, value, env)
-  of MemberAccess:
-    evaluator.evaluateMemberAccess(value, @[], env)
-  of IndexedAccess:
-    evaluator.evaluateIndexedAccess(value, env)
   of Command:
-    evaluator.evaluate(value, env)
+    if value.isDotAccessCommand:
+      evaluator.evaluateDotAccess(value, @[], env)
+    else:
+      evaluator.evaluate(value, env)
   of Block:
     evaluator.evaluateBlock(value, env.push)
   of Symbol:
@@ -534,12 +528,10 @@ proc evaluate*(evaluator: Evaluator; value: Value; env: Env): Value =
         of Command:
           if head.isLambdaLiteral:
             return evaluator.evaluate(head, env)
+          if head.isDotAccessCommand:
+            return evaluator.evaluateDotAccess(head, @[], env)
         of StringTemplate:
           return evaluator.evaluateQuoted(head, env)
-        of MemberAccess:
-          return evaluator.evaluateMemberAccess(head, @[], env)
-        of IndexedAccess:
-          return evaluator.evaluateIndexedAccess(head, env)
         of Symbol:
           if env.has(head):
             let found = env.find(head)
@@ -549,8 +541,8 @@ proc evaluate*(evaluator: Evaluator; value: Value; env: Env): Value =
           discard
         return head
       let args = value.objects[1 .. ^1]
-      if value.objects[0].kind == MemberAccess:
-        return evaluator.evaluateMemberAccess(value.objects[0], args, env)
+      if value.objects[0].isDotAccessCommand:
+        return evaluator.evaluateDotAccess(value.objects[0], args, env)
       if value.objects[0].kind != Symbol:
         raise newSushiError("commandKind head must be a symbol, got " & formatValue(value.objects[0]) & ".")
       if not env.has(value.objects[0]):
@@ -681,9 +673,10 @@ proc readMethodName(value: Value): tuple[name: string, isClassMethod: bool] =
         return (parts[1], true)
       raise newSushiError("Only Self.method syntax is supported for class methods.")
     (value.symbolValue, false)
-  of MemberAccess:
-    if value.receiver.kind == Symbol and value.receiver.symbolValue == "Self":
-      (value.memberName, true)
+  of Command:
+    if value.isDotAccessCommand and value.objects[1].kind == Symbol and value.objects[1].symbolValue == "Self" and
+        value.objects[2].kind == Symbol:
+      (value.objects[2].symbolValue, true)
     else:
       raise newSushiError("Only Self.method syntax is supported for class methods.")
   else:
@@ -787,10 +780,11 @@ proc resolveRawValueWithCapture(value: Value; evaluator: Evaluator; env: Env): R
         current = resolveRawSymbol(current, currentEnv)
       else:
         return ResolvedValue(value: current, env: currentEnv, hasCapturedEnv: hasCaptured)
-    of MemberAccess:
-      current = evaluator.evaluateMemberAccess(current, @[], currentEnv)
-    of IndexedAccess:
-      current = evaluator.evaluateIndexedAccess(current, currentEnv)
+    of Command:
+      if current.isDotAccessCommand:
+        current = evaluator.evaluateDotAccess(current, @[], currentEnv)
+      else:
+        return ResolvedValue(value: current, env: currentEnv, hasCapturedEnv: hasCaptured)
     else:
       return ResolvedValue(value: current, env: currentEnv, hasCapturedEnv: hasCaptured)
 
@@ -948,27 +942,32 @@ proc setCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   case args[0].kind
   of Symbol:
     env.setValue(args[0], value)
-  of MemberAccess:
-    let receiver = evaluator.evaluateQuoted(args[0].receiver, env)
-    if receiver.kind != Instance:
-      raise newSushiError("Only instance fields can be assigned with set.")
-    receiver.instanceDef.setField(args[0].memberName, value)
-  of IndexedAccess:
-    let receiver = evaluator.evaluateQuoted(args[0].indexedReceiver, env)
-    let indexValue = evaluator.evaluateQuoted(args[0].indexValue, env)
-    case receiver.kind
-    of Table:
-      receiver.entries[indexValue] = value
-    of Sequence:
-      if indexValue.kind != Integer or indexValue.intValue < 0 or indexValue.intValue >= receiver.items.len:
-        raise newSushiError("List index is out of range.")
-      receiver.items[indexValue.intValue] = value
-    of Array:
-      if indexValue.kind != Integer or indexValue.intValue < 0 or indexValue.intValue >= receiver.elements.len:
-        raise newSushiError("arrayKind index is out of range.")
-      receiver.elements[indexValue.intValue] = value
+  of Command:
+    if not args[0].isDotAccessCommand:
+      raise newSushiError("Invalid set target.")
+    let receiver = evaluator.evaluateQuoted(args[0].objects[1], env)
+    let accessor = args[0].objects[2]
+    if accessor.isDotIndexMarker:
+      let indexValue = evaluator.evaluateQuoted(accessor.objects[1], env)
+      case receiver.kind
+      of Table:
+        receiver.entries[indexValue] = value
+      of Sequence:
+        if indexValue.kind != Integer or indexValue.intValue < 0 or indexValue.intValue >= receiver.items.len:
+          raise newSushiError("List index is out of range.")
+        receiver.items[indexValue.intValue] = value
+      of Array:
+        if indexValue.kind != Integer or indexValue.intValue < 0 or indexValue.intValue >= receiver.elements.len:
+          raise newSushiError("arrayKind index is out of range.")
+        receiver.elements[indexValue.intValue] = value
+      else:
+        raise newSushiError("Only tables, lists, and arrays can be assigned with indexed set.")
+    elif accessor.kind == Symbol:
+      if receiver.kind != Instance:
+        raise newSushiError("Only instance fields can be assigned with set.")
+      receiver.instanceDef.setField(accessor.symbolValue, value)
     else:
-      raise newSushiError("Only tables, lists, and arrays can be assigned with indexed set.")
+      raise newSushiError("Invalid set target.")
   else:
     raise newSushiError("Invalid set target.")
   value
@@ -1455,6 +1454,11 @@ proc greaterThanCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value
     raise newSushiError("Native command '>' requires exactly two arguments.")
   newBoolean(readNumericValue(evaluator.evaluateQuoted(args[0], env)) > readNumericValue(evaluator.evaluateQuoted(args[1], env)))
 
+proc dotCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 2:
+    raise newSushiError("Native command '.' requires exactly two arguments.")
+  evaluator.evaluateDotAccess(newCommand(@[newSymbol("."), args[0], args[1]]), @[], env)
+
 proc bindNativeCommands(env: Env) =
   for (name, implementation) in [
     ("if", ifCommand),
@@ -1500,6 +1504,7 @@ proc bindNativeCommands(env: Env) =
     ("append", appendCommand),
     ("is-block", isBlockCommand),
     ("table-values", tableValuesCommand),
+    (".", dotCommand),
     ("+", addCommand),
     ("-", subtractCommand),
     ("<", lessThanCommand),

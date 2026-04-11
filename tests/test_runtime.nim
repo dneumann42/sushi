@@ -391,12 +391,54 @@ v.y
     let setterCall = expression.objects[1]
     check setterCall.kind == Command
     check setterCall.objects.len == 2
-    check setterCall.objects[0].kind == MemberAccess
-    check setterCall.objects[0].memberName == "b+="
-    check setterCall.objects[0].receiver.kind == Symbol
-    check setterCall.objects[0].receiver.symbolValue == "a"
+    check setterCall.objects[0].kind == Command
+    check setterCall.objects[0].objects.len == 3
+    check setterCall.objects[0].objects[0].kind == Symbol
+    check setterCall.objects[0].objects[0].symbolValue == "."
+    check setterCall.objects[0].objects[1].kind == Symbol
+    check setterCall.objects[0].objects[1].symbolValue == "a"
+    check setterCall.objects[0].objects[2].kind == Symbol
+    check setterCall.objects[0].objects[2].symbolValue == "b+="
     check setterCall.objects[1].kind == Integer
     check setterCall.objects[1].intValue == 2
+
+  test "parses grouped dot indices as explicit dot commands":
+    let script = parseScript("a.(1 + 2)\na.b.(1 + 2)", "<test>")
+    check script.kind == Script
+    check script.commands.len == 2
+
+    let indexed = script.commands[0].objects[0]
+    check indexed.kind == Command
+    check indexed.objects.len == 3
+    check indexed.objects[0].kind == Symbol
+    check indexed.objects[0].symbolValue == "."
+    check indexed.objects[1].kind == Symbol
+    check indexed.objects[1].symbolValue == "a"
+    check indexed.objects[2].kind == Command
+    check indexed.objects[2].objects.len == 2
+    check indexed.objects[2].objects[0].kind == Symbol
+    check indexed.objects[2].objects[0].symbolValue == ":dot-index"
+    check indexed.objects[2].objects[1].kind == Command
+    check indexed.objects[2].objects[1].objects.len == 3
+    check indexed.objects[2].objects[1].objects[0].kind == Symbol
+    check indexed.objects[2].objects[1].objects[0].symbolValue == "+"
+
+    let chained = script.commands[1].objects[0]
+    check chained.kind == Command
+    check chained.objects.len == 3
+    check chained.objects[0].kind == Symbol
+    check chained.objects[0].symbolValue == "."
+    check chained.objects[1].kind == Command
+    check chained.objects[1].objects.len == 3
+    check chained.objects[1].objects[0].kind == Symbol
+    check chained.objects[1].objects[0].symbolValue == "."
+    check chained.objects[1].objects[1].kind == Symbol
+    check chained.objects[1].objects[1].symbolValue == "a"
+    check chained.objects[1].objects[2].kind == Symbol
+    check chained.objects[1].objects[2].symbolValue == "b"
+    check chained.objects[2].kind == Command
+    check chained.objects[2].objects[0].kind == Symbol
+    check chained.objects[2].objects[0].symbolValue == ":dot-index"
 
   test "rejects split operator tokens after member access":
     expect SushiError:
@@ -420,6 +462,15 @@ counter.value
 """)
     check value.kind == Integer
     check value.intValue == 8
+
+  test "supports grouped dot indexing at runtime":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var rows #[#[10 20 30] #[40 50 60]]
+rows.(0 + 1).(1 + 1)
+""")
+    check value.kind == Integer
+    check value.intValue == 60
 
   test "loads the embedded prelude without scripts on disk":
     let tempDir = getTempDir() / "sushi-embedded-prelude-test"

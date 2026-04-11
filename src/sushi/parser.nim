@@ -44,30 +44,13 @@ type
 const
   OperatorChars = {'!', '$', '%', '&', '*', '+', '-', '.', '/', ':', '<', '=', '>', '?', '@', '^', '~'}
   SingleCharacterSymbols = {'{', '}', '(', ')', '[', ']'}
+  DotIndexMarker = ":dot-index"
 
 proc parserError(message: string; span: SourceSpan): SushiError =
   newSushiError(message, span)
 
 proc isIdentifierStart(ch: char): bool =
   ch.isAlphaAscii or ch == '_'
-
-proc isMemberName(lexeme: string): bool =
-  if lexeme.len == 0 or not isIdentifierStart(lexeme[0]):
-    return false
-  var i = 1
-  while i < lexeme.len:
-    let ch = lexeme[i]
-    if ch.isAlphaNumeric or ch == '_' or ch == '-':
-      inc i
-      continue
-    if ch == '=' and i == lexeme.high:
-      return true
-    if ch in OperatorChars:
-      while i < lexeme.high and lexeme[i] in OperatorChars and lexeme[i] != '=':
-        inc i
-      return i == lexeme.high and lexeme[i] == '='
-    return false
-  true
 
 proc initParser(source: SourceFile): Parser =
   result.source = source
@@ -86,7 +69,8 @@ proc initParser(source: SourceFile): Parser =
     "*": 6,
     "/": 6,
     "%": 6,
-    "^": 7
+    "^": 7,
+    ".": 8
   }.toTable
   result.rightAssociative = @["^"]
   result.unaryOperators = @["not", "-"]
@@ -375,7 +359,7 @@ proc tryGetInfixPrecedence(parser: Parser; op: string; precedence: var int): boo
   if parser.precedences.hasKey(op):
     precedence = parser.precedences[op]
     return true
-  if op in [".", ")", "]", "}", "end"]:
+  if op in [")", "]", "}", "end"]:
     precedence = 0
     return false
   precedence = 0
@@ -416,6 +400,7 @@ proc readScript(parser: var Parser): Value
 proc readPostfixExpression(parser: var Parser): Value
 proc readCommandObject(parser: var Parser; isHead: bool): Value
 proc readFnValue(parser: var Parser): Value
+proc readDotRight(parser: var Parser; dotSpan: SourceSpan): Value
 
 proc parseTemplateObject(parser: Parser; source: string; outerSpan: SourceSpan): Value =
   var nested = initParser(newSourceFile(parser.source.name, source))
@@ -482,8 +467,9 @@ proc canAbsorbSpacedOperatorSuffix(value: Value): bool =
   case value.kind
   of Symbol:
     not hasAttachedOperatorSuffix(value.symbolValue)
-  of MemberAccess:
-    not hasAttachedOperatorSuffix(value.memberName)
+  of Command:
+    value.objects.len == 3 and value.objects[0].kind == Symbol and value.objects[0].symbolValue == "." and
+      value.objects[2].kind == Symbol and not hasAttachedOperatorSuffix(value.objects[2].symbolValue)
   else:
     false
 
@@ -491,8 +477,14 @@ proc appendOperatorSuffix(value: Value; suffix: Token): Value =
   case value.kind
   of Symbol:
     newSymbol(value.symbolValue & suffix.lexeme, cover(value.span, suffix.span))
-  of MemberAccess:
-    newMemberAccess(value.receiver, value.memberName & suffix.lexeme, cover(value.span, suffix.span))
+  of Command:
+    if value.objects.len == 3 and value.objects[0].kind == Symbol and value.objects[0].symbolValue == "." and
+        value.objects[2].kind == Symbol:
+      var objects = value.objects
+      objects[2] = newSymbol(objects[2].symbolValue & suffix.lexeme, cover(objects[2].span, suffix.span))
+      newCommand(objects, cover(value.span, suffix.span))
+    else:
+      value
   else:
     value
 
@@ -528,22 +520,19 @@ proc readPrefixExpression(parser: var Parser): Value =
     return newCommand(@[newSymbol(op.lexeme, op.span), operand], cover(op.span, operand.span))
   parser.readPrimaryExpression
 
-proc readIndexedArgument(parser: var Parser; openSpan: SourceSpan): Value =
-  let saved = parser.tokenIndex
-  let expression = parser.readExpression(0)
-  if parser.check(")"):
-    return expression
-  parser.tokenIndex = saved
-  let command = parser.readCommand()
-  if command.objects.len == 0:
-    raise parserError("Expected value inside indexed access.", openSpan)
-  if command.objects.len == 1: command.objects[0] else: command
-
 proc readParenthesizedExpression(parser: var Parser): Value =
   let openTok = parser.expect("(", "Expected '(' to start expression")
   let expression = parser.readExpression(0)
   let closeTok = parser.expect(")", "Unbalanced parenthesis", openTok.span)
   normalizeTuple(withSpan(expression, cover(openTok.span, expression.span, closeTok.span)))
+
+proc readDotRight(parser: var Parser; dotSpan: SourceSpan): Value =
+  if parser.check("("):
+    let grouped = parser.readParenthesizedExpression()
+    return newCommand(@[newSymbol(DotIndexMarker, dotSpan), grouped], cover(dotSpan, grouped.span))
+  if parser.isAtEnd or parser.peek.kind != Symbol:
+    raise parserError("Expected member name or '(...' after '.'.", dotSpan)
+  parser.readSymbolValue
 
 proc readBracketCommand(parser: var Parser): Value =
   let openTok = parser.expect("[", "Expected '[' to start command")
@@ -654,16 +643,8 @@ proc readPostfixExpression(parser: var Parser): Value =
   var value = parser.readSymbolDrivenObject()
   while not parser.isAtEnd and parser.check("."):
     let dot = parser.advance
-    if parser.check("("):
-      let openTok = parser.advance
-      let idx = parser.readIndexedArgument(openTok.span)
-      let closeTok = parser.expect(")", "Unbalanced parenthesis", openTok.span)
-      value = newIndexedAccess(value, normalizeTuple(idx), cover(value.span, dot.span, closeTok.span))
-      continue
-    if parser.isAtEnd or parser.peek.kind != Symbol or not isMemberName(parser.peek.lexeme):
-      raise parserError("Expected member name or '(...' after '.'.", dot.span)
-    let member = parser.advance
-    value = newMemberAccess(value, member.lexeme, cover(value.span, dot.span, member.span))
+    let right = parser.readDotRight(dot.span)
+    value = newCommand(@[newSymbol(".", dot.span), value, right], cover(value.span, dot.span, right.span))
   while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
     let op = parser.advance
     let right = parser.readNonTupleObject()
