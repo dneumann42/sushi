@@ -470,14 +470,14 @@ proc normalizeTuple(value: Value): Value =
     result = value
 
 proc readExpression(parser: var Parser; minPrecedence: int): Value
-proc readObject(parser: var Parser): Value
-proc readNonTupleObject(parser: var Parser): Value
 proc readCommand(parser: var Parser): Value
 proc readScript(parser: var Parser): Value
 proc readPostfixExpression(parser: var Parser): Value
-proc readCommandObject(parser: var Parser; isHead: bool): Value
 proc readFnValue(parser: var Parser): Value
 proc readDotRight(parser: var Parser; dotSpan: SourceSpan): Value
+proc readAtom(parser: var Parser): Value
+proc readSimpleObject(parser: var Parser): Value
+proc readObject(parser: var Parser; allowUnaryPrefix: bool): Value
 
 proc parseTemplateObject(parser: Parser; source: string; outerSpan: SourceSpan): Value =
   var nested = initParser(newSourceFile(parser.source.name, source))
@@ -576,7 +576,7 @@ proc tryConsumeSpacedOperatorSuffix(parser: var Parser; value: var Value; suffix
   value = value.appendOperatorSuffix(suffix)
   true
 
-proc readPrimaryExpression(parser: var Parser): Value =
+proc readAtom(parser: var Parser): Value =
   let token = parser.peek
   case token.kind
   of Number:
@@ -588,7 +588,7 @@ proc readPrimaryExpression(parser: var Parser): Value =
   of Symbol:
     parser.readPostfixExpression
   else:
-    raise parserError("Unexpected token in expression: " & token.lexeme, token.span)
+    raise parserError("Unexpected token in object: " & token.lexeme, token.span)
 
 proc readPrefixExpression(parser: var Parser): Value =
   let token = parser.peek
@@ -596,7 +596,7 @@ proc readPrefixExpression(parser: var Parser): Value =
     let op = parser.advance
     let operand = parser.readExpression(6)
     return newCommand(@[newSymbol(op.lexeme, op.span), operand], cover(op.span, operand.span))
-  parser.readPrimaryExpression
+  parser.readAtom
 
 proc readParenthesizedExpression(parser: var Parser): Value =
   let openTok = parser.expect("(", "Expected '(' to start expression")
@@ -621,7 +621,7 @@ proc readBracketCommand(parser: var Parser): Value =
     if parser.check("]"):
       let closeTok = parser.advance
       return newCommand(objects, cover(openTok.span, coverObjects(objects), closeTok.span))
-    var obj = parser.readCommandObject(objects.len == 0)
+    var obj = parser.readObject(objects.len != 0)
     if objects.len == 0:
       var suffix: Token
       discard parser.tryConsumeSpacedOperatorSuffix(obj, suffix)
@@ -682,25 +682,19 @@ proc readPostfixExpression(parser: var Parser): Value =
     value = newCommand(@[newSymbol(".", dot.span), value, right], cover(value.span, dot.span, right.span))
   while not parser.isAtEnd and parser.peek.kind == Symbol and parser.peek.lexeme in parser.postfixBinaryOperators:
     let op = parser.advance
-    let right = parser.readNonTupleObject()
+    let right = parser.readSimpleObject()
     if right.isNil:
       raise parserError("Expected value after '" & op.lexeme & "'.", op.span)
     value = newCommand(@[newSymbol(op.lexeme, op.span), value, right], cover(value.span, op.span, right.span))
   value
 
-proc readNonTupleObject(parser: var Parser): Value =
+proc readSimpleObject(parser: var Parser): Value =
   let token = parser.peek
   case token.kind
-  of Number:
-    parser.readNumberValue
-  of Boolean:
-    parser.readBooleanValue
-  of Text:
-    parser.readTextValue
   of Terminator:
     nil
-  of Symbol:
-    parser.readPostfixExpression
+  else:
+    parser.readAtom()
 
 proc readExpression(parser: var Parser; minPrecedence: int): Value =
   var left = parser.readPrefixExpression()
@@ -709,7 +703,7 @@ proc readExpression(parser: var Parser; minPrecedence: int): Value =
       break
     var suffix: Token
     if parser.tryConsumeSpacedOperatorSuffix(left, suffix):
-      let right = parser.readNonTupleObject()
+      let right = parser.readSimpleObject()
       if right.isNil:
         raise parserError("Expected value after '" & suffix.lexeme & "'.", suffix.span)
       left = newCommand(@[left, right], cover(left.span, right.span))
@@ -732,32 +726,19 @@ proc readExpression(parser: var Parser; minPrecedence: int): Value =
         newCommand(@[newSymbol(op, operatorToken.span), left, right], cover(left.span, operatorToken.span, right.span))
   left
 
-proc readCommandObject(parser: var Parser; isHead: bool): Value =
-  if isHead:
-    return parser.readObject()
-  var obj: Value
-  if parser.peek.kind == Symbol and parser.peek.lexeme in parser.unaryOperators:
-    obj = parser.readPrefixExpression()
-    while not parser.isAtEnd and parser.check(":"):
-      let op = parser.advance
-      let nextValue = parser.readNonTupleObject()
-      if nextValue.isNil:
-        raise parserError("Expected value after ':'.", op.span)
-      obj = createTupleNode(obj, nextValue, op.span)
-    return normalizeTuple(obj)
-  else:
-    obj = parser.readObject()
-  obj
-
-proc readObject(parser: var Parser): Value =
+proc readObject(parser: var Parser; allowUnaryPrefix: bool): Value =
   if parser.isAtEnd:
     raise parserError("Unexpected end of input", parser.currentSpan)
-  var obj = parser.readNonTupleObject()
+  var obj: Value
+  if allowUnaryPrefix and parser.peek.kind == Symbol and parser.peek.lexeme in parser.unaryOperators:
+    obj = parser.readPrefixExpression()
+  else:
+    obj = parser.readSimpleObject()
   if obj.isNil:
     return nil
   while not parser.isAtEnd and parser.check(":"):
     let op = parser.advance
-    let nextValue = parser.readNonTupleObject()
+    let nextValue = parser.readSimpleObject()
     if nextValue.isNil:
       raise parserError("Expected value after ':'.", op.span)
     obj = createTupleNode(obj, nextValue, op.span)
@@ -772,7 +753,7 @@ proc readCommand(parser: var Parser): Value =
     let lexeme = parser.peek.lexeme
     if lexeme in ["end", "]", "}", ")"]:
       break
-    var obj = parser.readCommandObject(objects.len == 0)
+    var obj = parser.readObject(objects.len != 0)
     if objects.len == 0:
       var suffix: Token
       discard parser.tryConsumeSpacedOperatorSuffix(obj, suffix)
