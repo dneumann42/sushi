@@ -338,6 +338,51 @@ add-two 40
     check value.kind == Integer
     check value.intValue == 42
 
+  test "supports else via reader replacement":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+if F do
+  1
+else
+  2
+end
+""")
+    check value.kind == Integer
+    check value.intValue == 2
+
+  test "supports chained elif via reader replacement":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+if F do
+  1
+elif F do
+  2
+elif T do
+  3
+else
+  4
+end
+""")
+    check value.kind == Integer
+    check value.intValue == 3
+
+  test "does not rewrite text literals that contain else keywords":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+"else elif"
+""")
+    check value.kind == Text
+    check value.textValue == "else elif"
+
+  test "supports list syntax via reader replacement":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var xs #[10 20 30]
++ [count xs] xs.(1)
+""")
+    check value.kind == Integer
+    check value.intValue == 23
+
   test "supports do-times from the prelude":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -829,7 +874,7 @@ if T do
     + 1 2 ; tail
 end"""
 
-  test "formats multiline sequences with comments":
+  test "formats multiline lists with comments":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
 use format global
@@ -840,7 +885,7 @@ format-source "call #[
 ]"
 """)
     check value.kind == Text
-    check value.textValue == """call #[
+    check value.textValue == """call [list
     1
     ; item
     2

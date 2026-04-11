@@ -1,9 +1,12 @@
 use io
 
-record V3 x y z
+record V3   \
+  x         \
+  y         \
+  z
 
 var v [new V3 1 2 3]
-;; records generate these methods by default
+
 v.x = 10
 v.y = {
   z 30

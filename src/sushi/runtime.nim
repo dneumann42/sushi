@@ -279,7 +279,7 @@ proc formatValue*(value: Value): string =
   of Boolean:
     if value.boolValue: "T" else: "F"
   of Sequence:
-    "#[" & value.items.map(formatValue).join(" ") & "]"
+    if value.items.len == 0: "[list]" else: "[list " & value.items.map(formatValue).join(" ") & "]"
   of Table:
     var parts: seq[string]
     for key, item in value.entries.pairs:

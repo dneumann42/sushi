@@ -124,12 +124,41 @@ fun objects-inlineable [objects index] do
     end
 end
 
+fun objects-inlineable-from [objects index] do
+    if (index eq [length objects]) do
+        T
+    end do
+        var obj [eval objects.(index)]
+        and [not [eq [node-kind obj] "block"]] \
+            [and [node-inlineable obj] [objects-inlineable-from objects (index + 1)]]
+    end
+end
+
+fun node-list-command [node] do
+    if [not ([node-kind node] eq "command")] do
+        F
+    end do
+        var objects [field node "objects"]
+        if ([length objects] eq 0) do
+            F
+        end do
+            var head [eval objects.(0)]
+            and ([node-kind head] eq "symbol") \
+                ([field head "text"] eq "list")
+        end
+    end
+end
+
 fun node-inlineable [node] do
     var kind [node-kind node]
     cond do
         [node-has-leading node]: F
         [node-has-trailing node]: F
         ((kind eq "script") or (kind eq "block")): F
+        [node-list-command node]: do
+            and [< [length [node-render node]] 61] \
+                [objects-inlineable-from [field node "objects"] 1]
+        end
         (kind eq "sequence"): do
             and [comments-empty [node-suffix node]] \
                 [and [< [length [node-render node]] 61] \
@@ -200,6 +229,33 @@ fun format-command-object [node depth] do
     format-command-objects [field node "objects"] depth 0
 end
 
+fun format-list-command-items [objects depth index] do
+    if (index eq [length objects]) do
+        ""
+    end do
+        var current [format-node [eval objects.(index)] depth]
+        if ((index + 1) eq [length objects]) do
+            eval current
+        end do
+            "\(current)\n\(format-list-command-items objects depth (index + 1))"
+        end
+    end
+end
+
+fun format-list-command-inline [node depth] do
+    var objects [field node "objects"]
+    if ([length objects] eq 1) do
+        "[list]"
+    end do
+        if [node-inlineable node] do
+            "[list \(format-command-objects objects depth 1)]"
+        end do
+            var body [format-list-command-items objects (depth + 1) 1]
+            "[list\n\(body)\n\(indent depth)]"
+        end
+    end
+end
+
 fun format-block-inline [node depth] do
     var commands [field node "commands"]
     var suffix [node-suffix node]
@@ -228,7 +284,7 @@ fun format-sequence-inline [node depth] do
             if [not [comments-empty suffix]] do
                 set body "\(body)\n\(emit-comments suffix (depth + 1))"
             end
-            "#[\n\(body)\n\(indent depth)]"
+            "[list\n\(body)\n\(indent depth)]"
         end
     end
 end
@@ -254,6 +310,7 @@ end
 fun format-object [node depth] do
     var kind [node-kind node]
     cond do
+        [node-list-command node]: [format-list-command-inline node depth]
         (kind eq "block"): [format-block-inline node depth]
         (kind eq "sequence"): [format-sequence-inline node depth]
         (kind eq "table"): [format-table-inline node depth]

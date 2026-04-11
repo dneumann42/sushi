@@ -41,6 +41,10 @@ type
     unaryOperators: seq[string]
     postfixBinaryOperators: Table[string, bool]
 
+  ReaderReplacementRule = object
+    match: seq[string]
+    replacement: seq[Token]
+
 const
   OperatorChars = {'!', '$', '%', '&', '*', '+', '-', '.', '/', ':', '<', '=', '>', '?', '@', '^', '~'}
   SingleCharacterSymbols = {'{', '}', '(', ')', '[', ']'}
@@ -78,6 +82,29 @@ proc initParser(source: SourceFile): Parser =
 
 proc tryConsumeLineContinuation(parser: Parser; index: var int): bool
 proc readTextLiteralToken(parser: Parser; index: var int; startPos: int): Token
+
+proc readerReplacementRules(): seq[ReaderReplacementRule] =
+  @[
+    ReaderReplacementRule(
+      match: @["#["],
+      replacement: @[
+        Token(kind: Symbol, lexeme: "["),
+        Token(kind: Symbol, lexeme: "list")
+      ]),
+    ReaderReplacementRule(
+      match: @["else"],
+      replacement: @[
+        Token(kind: Symbol, lexeme: "end"),
+        Token(kind: Symbol, lexeme: "do")
+      ]),
+    ReaderReplacementRule(
+      match: @["elif"],
+      replacement: @[
+        Token(kind: Symbol, lexeme: "end"),
+        Token(kind: Terminator, lexeme: "\n"),
+        Token(kind: Symbol, lexeme: "if")
+      ])
+  ]
 
 proc scanComments*(source: SourceFile): seq[CommentTrivia] =
   var parser = initParser(source)
@@ -123,6 +150,9 @@ proc span(parser: Parser; startPos, endPos: int): SourceSpan =
 proc addToken(parser: var Parser; kind: TokenKind; lexeme: string; startPos, endPos: int;
     textSegments: seq[TextTokenSegment] = @[]) =
   parser.tokens.add(Token(kind: kind, lexeme: lexeme, span: parser.span(startPos, endPos), textSegments: textSegments))
+
+proc newReplacementToken(kind: TokenKind; lexeme: string; span: SourceSpan): Token =
+  Token(kind: kind, lexeme: lexeme, span: span, textSegments: @[])
 
 proc skipNestedString(parser: Parser; index: var int) =
   while index < parser.source.len:
@@ -312,6 +342,41 @@ proc tokenize(parser: var Parser) =
       continue
     raise parserError("Unsupported character '" & $ch & "'.", parser.span(index, index + 1))
 
+proc applyReaderReplacements(parser: var Parser) =
+  let rules = readerReplacementRules()
+  if rules.len == 0 or parser.tokens.len == 0:
+    return
+
+  var rewritten: seq[Token]
+  var index = 0
+  while index < parser.tokens.len:
+    var matchedRule = -1
+    var matchedLen = 0
+    for ruleIndex, rule in rules:
+      if rule.match.len == 0 or index + rule.match.len > parser.tokens.len:
+        continue
+      var ok = true
+      for offset, lexeme in rule.match:
+        let token = parser.tokens[index + offset]
+        if token.kind != Symbol or token.lexeme != lexeme:
+          ok = false
+          break
+      if ok and rule.match.len > matchedLen:
+        matchedRule = ruleIndex
+        matchedLen = rule.match.len
+
+    if matchedRule >= 0:
+      let replacementSpan = cover(parser.tokens[index].span, parser.tokens[index + matchedLen - 1].span)
+      for replacement in rules[matchedRule].replacement:
+        rewritten.add(newReplacementToken(replacement.kind, replacement.lexeme, replacementSpan))
+      index += matchedLen
+      continue
+
+    rewritten.add(parser.tokens[index])
+    inc index
+
+  parser.tokens = rewritten
+
 proc isAtEnd(parser: Parser): bool = parser.tokenIndex >= parser.tokens.len
 
 proc peek(parser: Parser): Token =
@@ -406,6 +471,7 @@ proc readDotRight(parser: var Parser; dotSpan: SourceSpan): Value
 proc parseTemplateObject(parser: Parser; source: string; outerSpan: SourceSpan): Value =
   var nested = initParser(newSourceFile(parser.source.name, source))
   nested.tokenize()
+  nested.applyReaderReplacements()
   let script = nested.readScript()
   if script.commands.len != 1:
     raise parserError("String template expects exactly one object.", outerSpan)
@@ -552,21 +618,6 @@ proc readBracketCommand(parser: var Parser): Value =
       objects.add(obj)
   raise parserError("Expected ']' to end command", openTok.span)
 
-proc readSequenceValue(parser: var Parser): Value =
-  let openTok = parser.expect("#[", "Expected '#[' to start list literal")
-  var objects: seq[Value]
-  while not parser.isAtEnd:
-    while parser.checkTerminator and parser.peek.lexeme == "\n":
-      parser.consumeTerminator()
-    if parser.check("]"):
-      let closeTok = parser.advance
-      return newSequence(objects, cover(openTok.span, coverObjects(objects), closeTok.span))
-    let item = parser.readObject()
-    if item.isNil:
-      raise parserError("Expected list element.", openTok.span)
-    objects.add(item)
-  raise parserError("Expected ']' to end list literal", openTok.span)
-
 proc readTableValue(parser: var Parser): Value =
   let openTok = parser.expect("{", "Expected '{' to start table")
   var entries = initTable[Value, Value]()
@@ -629,8 +680,6 @@ proc readSymbolDrivenObject(parser: var Parser): Value =
     parser.readFnValue
   of "[":
     parser.readBracketCommand
-  of "#[":
-    parser.readSequenceValue
   of "{":
     parser.readTableValue
   of "do":
@@ -764,6 +813,7 @@ proc readScript(parser: var Parser): Value =
 proc parseScript*(source: SourceFile): Value =
   var parser = initParser(source)
   parser.tokenize()
+  parser.applyReaderReplacements()
   parser.readScript()
 
 proc parseScript*(source, sourceName: string): Value =
