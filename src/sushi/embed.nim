@@ -6,6 +6,7 @@ proc newEmbeddedRuntime*(args: seq[string] = @[]): SushiRuntime =
   result = newRuntime(args)
   discard result
     .registerNativeModule(buildIoModule())
+    .registerNativeModule(buildHttpModule())
     .registerNativeModule(buildBaseModule())
     .registerNativeModule(buildMathModule())
     .registerNativeModule(buildSyntaxModule())

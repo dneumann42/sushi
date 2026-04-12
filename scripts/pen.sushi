@@ -1,9 +1,13 @@
 use io
+use http
 use syntax global
 
 var documents {}
-var watch-mode F
-var reload-script "window.setTimeout(function () { window.location.reload(); }, 1000);"
+var reload-url F
+
+fun build-reload-script [url] do
+  "var source = new EventSource(\"\(url)\");window.addEventListener(\"beforeunload\", function () { source.close(); });source.addEventListener(\"reload\", function () { source.close(); window.location.reload(); });"
+end
 
 fun build-html [blk] do
   var parts #[]
@@ -45,8 +49,8 @@ fun build-html [blk] do
     var children #[]
     set parts children
     replay blk
-    if [and watch-mode (tag eq "head")] do
-      append parts #["script" [empty-attrs] reload-script]
+    if [and [not (reload-url eq F)] (tag eq "head")] do
+      append parts #["script" [empty-attrs] [build-reload-script reload-url]]
     end
     set parts parent
     append parts #[tag kv children]
@@ -178,12 +182,15 @@ end
 fun clear-documents [] \\
   set documents {}
 
-fun render-source-with-options [source reload-mode] do
+fun top-level-html [text] \\
+  io.concat "<!DOCTYPE html>" text
+
+fun render-source-with-options [source watch-endpoint] do
   clear-documents
-  set watch-mode reload-mode
+  set reload-url watch-endpoint
   run source
-  set watch-mode F
-  documents.(Main)
+  set reload-url F
+  top-level-html documents.(Main)
 end
 
 fun render-source [source] do
@@ -194,8 +201,8 @@ fun render-file [path] do
   render-source [io.read-file path]
 end
 
-fun render-file-watch [path] do
-  render-source-with-options [io.read-file path] T
+fun render-file-watch [path watch-endpoint] do
+  render-source-with-options [io.read-file path] watch-endpoint
 end
 
 fun write-html-file [input-path output-path] do
@@ -203,68 +210,38 @@ fun write-html-file [input-path output-path] do
   output-path
 end
 
-fun write-html-file-watch [input-path output-path] do
-  io.write-file output-path [render-file-watch input-path]
+fun write-html-file-watch [input-path output-path watch-endpoint] do
+  io.write-file output-path [render-file-watch input-path watch-endpoint]
   output-path
 end
 
 fun watch-html-file [input-path output-path] do
-  write-html-file-watch input-path output-path
+  var generation 0
+  var current-path "/pen-watch-\(generation)"
+  var current-endpoint [http.sse-start current-path]
+  var current-url [field current-endpoint "url"]
+  var stale-path F
+  write-html-file-watch input-path output-path current-url
   var last-updated [file-info :last-updated input-path]
   while T do
     sleep 1
     var current-updated [file-info :last-updated input-path]
     if [not (current-updated eq last-updated)] do
-      write-html-file-watch input-path output-path
+      set generation [+ generation 1]
+      var next-path "/pen-watch-\(generation)"
+      var next-endpoint [http.sse-start next-path]
+      var next-url [field next-endpoint "url"]
+      write-html-file-watch input-path output-path next-url
+      http.sse-publish current-path "reload" ""
+      if [not (stale-path eq F)] do
+        http.sse-stop stale-path
+      end
+      set stale-path current-path
+      set current-path next-path
+      set current-url next-url
       set last-updated current-updated
     end
   end
-end
-
-fun build-demo [] do
-  var page-title "Pen DSL Demo"
-  var hero-name "World"
-
-  doc Main \\
-    html { lang "en" } \\
-      head { } \\
-        meta { charset "utf-8" }
-        meta { name "viewport" content "width=device-width, initial-scale=1" }
-        title-tag { } page-title
-        link { rel "stylesheet" href "/pen.css" }
-      body { class "page-shell" } \\
-        header { class "hero" } \\
-          nav { class "hero-nav" } \\
-            a { href "/" class "brand" } "pen"
-            a { href "/docs" class "nav-link" } "Docs"
-            a { href "/examples" class "nav-link" } "Examples"
-          h1 { class "hero-title" } "Hello, \(hero-name)!"
-          p { class "hero-copy" } "A tiny Sushi DSL can still render a whole page."
-          button { class "primary-action" } "Render demo"
-        main { class "content-grid" } \\
-          section { class "intro card" } \\
-            h2 { } "What it supports"
-            p { } "Named helpers for common tags, inline text nodes, and indentation-driven blocks."
-            ul { class "feature-list" } \\
-              li { } "semantic layout helpers"
-              li { } "list and link helpers"
-              li { } "void tags like meta, link, img, and hr"
-          section { class "media card" } \\
-            h2 { } "Example media"
-            img { src "/hero.png" alt "Pen demo screenshot" class "hero-image" }
-            hr { class "section-rule" }
-            p { } "The renderer now understands common HTML void elements."
-          article { class "notes card" } \\
-            h2 { } "Notes"
-            p { } "Keep the DSL small, but make the example feel like a real document."
-        footer { class "page-footer" } \\
-          small { } "Built with pen.sushi and the Sushi runtime."
-end
-
-fun demo-html [] do
-  clear-documents
-  build-demo
-  documents.(Main)
 end
 
 0

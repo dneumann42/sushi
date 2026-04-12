@@ -17,15 +17,17 @@ var styles "
     flex-direction: column;
     gap: 16px;
   }
+  .align-center { align-items: center; }
 "
 
 fun page-header [title] do
   doc-string \\
     header { class "hbox" } \\
       h1 { } title
-      nav { class "hbox" } \\
+      nav { class "hbox align-center" } \\
         a { href "#" } "Test"
         a { href "#" } "About"
+        a { href "#" } "Help"
 end
 
 fun page [page-title slot] do
@@ -35,7 +37,7 @@ fun page [page-title slot] do
         title-tag { } page-title
         style { } styles
       body {} \\
-        @ [page-header "MAIN PAGE"]
+        @ [page-header "Sushi"]
         @ slot
 end
 

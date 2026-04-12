@@ -1,4 +1,4 @@
-import std/[colors, math, os, sequtils, strutils, tables, terminal, times]
+import std/[colors, locks, math, net, os, sequtils, strutils, tables, terminal, times]
 when defined(windows):
   import std/winlean
   proc getConsoleMode(hConsoleHandle: Handle; dwMode: ptr DWORD): WINBOOL {.
@@ -42,6 +42,214 @@ proc requireSequence(value: Value; commandName: string): Value =
   if value.kind != Sequence:
     raise newException(ValueError, "'" & commandName & "' expects a list.")
   value
+
+type
+  SseServerState = ref object
+    path: string
+    port: Port
+    server: Socket
+    clients: seq[Socket]
+    running: bool
+    lock: Lock
+    thread: Thread[pointer]
+
+var
+  sseRegistryLock: Lock
+  sseRegistryInitialized = false
+  sseServers: Table[string, SseServerState]
+
+proc ensureSseRegistry() =
+  if sseRegistryInitialized:
+    return
+  initLock(sseRegistryLock)
+  sseServers = initTable[string, SseServerState]()
+  sseRegistryInitialized = true
+
+proc isServerRunning(state: SseServerState): bool =
+  acquire(state.lock)
+  try:
+    result = state.running
+  finally:
+    release(state.lock)
+
+proc setServerRunning(state: SseServerState; value: bool) =
+  acquire(state.lock)
+  try:
+    state.running = value
+  finally:
+    release(state.lock)
+
+proc closeSocketQuietly(socket: Socket) =
+  try:
+    socket.close()
+  except CatchableError:
+    discard
+
+proc readHttpRequestPath(client: Socket): string =
+  var request = ""
+  while "\r\n\r\n" notin request and request.len < 16384:
+    let chunk = client.recv(1024)
+    if chunk.len == 0:
+      break
+    request.add(chunk)
+  if request.len == 0:
+    return ""
+  let lines = request.split("\r\n")
+  if lines.len == 0:
+    return ""
+  let parts = lines[0].split(" ")
+  if parts.len < 2:
+    return ""
+  parts[1]
+
+proc sseDataLines(data: string): string =
+  let normalized = data.replace("\r\n", "\n").replace('\r', '\n')
+  let lines = normalized.split('\n')
+  result = lines.join("\r\ndata: ")
+
+proc writeSseResponse(client: Socket) =
+  client.send(
+    "HTTP/1.1 200 OK\r\n" &
+    "Content-Type: text/event-stream\r\n" &
+    "Cache-Control: no-cache\r\n" &
+    "Connection: keep-alive\r\n" &
+    "Access-Control-Allow-Origin: *\r\n" &
+    "\r\n" &
+    ": connected\r\n\r\n")
+
+proc writeNotFound(client: Socket) =
+  client.send(
+    "HTTP/1.1 404 Not Found\r\n" &
+    "Content-Type: text/plain\r\n" &
+    "Connection: close\r\n" &
+    "\r\n" &
+    "not found")
+
+proc sseServerThread(rawState: pointer) {.thread.} =
+  let state = cast[SseServerState](rawState)
+  while true:
+    var client = newSocket(buffered = false)
+    try:
+      state.server.accept(client)
+    except CatchableError:
+      client.closeSocketQuietly()
+      if not state.isServerRunning():
+        break
+      continue
+
+    if not state.isServerRunning():
+      client.closeSocketQuietly()
+      break
+
+    let requestPath = client.readHttpRequestPath()
+    if requestPath != state.path:
+      try:
+        client.writeNotFound()
+      except CatchableError:
+        discard
+      client.closeSocketQuietly()
+      continue
+
+    try:
+      client.writeSseResponse()
+      acquire(state.lock)
+      try:
+        state.clients.add(client)
+      finally:
+        release(state.lock)
+    except CatchableError:
+      client.closeSocketQuietly()
+
+  state.server.closeSocketQuietly()
+  acquire(state.lock)
+  try:
+    for client in state.clients:
+      client.closeSocketQuietly()
+    state.clients.setLen(0)
+  finally:
+    release(state.lock)
+
+proc startSseServer(path: string): SseServerState =
+  ensureSseRegistry()
+  acquire(sseRegistryLock)
+  try:
+    if sseServers.hasKey(path):
+      raise newException(ValueError, "An SSE server is already running for '" & path & "'.")
+  finally:
+    release(sseRegistryLock)
+
+  let server = newSocket(buffered = false)
+  server.setSockOpt(OptReuseAddr, true)
+  server.bindAddr(Port(0), "127.0.0.1")
+  server.listen()
+  let (_, port) = server.getLocalAddr()
+  result = SseServerState(path: path, port: port, server: server, clients: @[], running: true)
+  initLock(result.lock)
+  createThread(result.thread, sseServerThread, cast[pointer](result))
+
+  acquire(sseRegistryLock)
+  try:
+    sseServers[path] = result
+  finally:
+    release(sseRegistryLock)
+
+proc findSseServer(path: string): SseServerState =
+  ensureSseRegistry()
+  acquire(sseRegistryLock)
+  try:
+    if sseServers.hasKey(path):
+      result = sseServers[path]
+  finally:
+    release(sseRegistryLock)
+
+proc wakeSseServer(state: SseServerState) =
+  try:
+    let wake = newSocket(buffered = false)
+    wake.connect("127.0.0.1", state.port)
+    wake.closeSocketQuietly()
+  except CatchableError:
+    discard
+
+proc stopSseServer(path: string): bool =
+  let state = findSseServer(path)
+  if state.isNil:
+    return false
+
+  acquire(sseRegistryLock)
+  try:
+    if sseServers.hasKey(path):
+      sseServers.del(path)
+  finally:
+    release(sseRegistryLock)
+
+  state.setServerRunning(false)
+  state.wakeSseServer()
+  joinThread(state.thread)
+  deinitLock(state.lock)
+  true
+
+proc publishSseEvent(path, eventName, data: string): bool =
+  let state = findSseServer(path)
+  if state.isNil:
+    return false
+
+  let payload = "event: " & eventName & "\r\n" &
+    "data: " & sseDataLines(data) & "\r\n\r\n"
+
+  acquire(state.lock)
+  try:
+    var index = 0
+    while index < state.clients.len:
+      let client = state.clients[index]
+      try:
+        client.send(payload)
+        inc(index)
+      except CatchableError:
+        client.closeSocketQuietly()
+        state.clients.delete(index)
+  finally:
+    release(state.lock)
+  true
 
 proc put(entries: var Table[Value, Value]; key: string; value: Value) =
   entries[newText(key)] = value
@@ -727,7 +935,8 @@ proc buildIoModule*(): NativeModuleDefinition =
     let path = requireText(evaluator.evaluateQuoted(args[1], env), "file-info")
     case kind
     of ":last-updated":
-      newInteger(getLastModificationTime(path).toUnix().int)
+      let modified = getLastModificationTime(path)
+      newInteger((modified.toUnix * 1_000_000_000'i64 + modified.nanosecond.int64).int)
     else:
       raise newException(ValueError, "'file-info' does not support kind '" & kind & "'."))
 
@@ -812,6 +1021,38 @@ proc buildIoModule*(): NativeModuleDefinition =
     newBoolean(true))
 
   builder.build
+
+proc buildHttpModule*(): NativeModuleDefinition =
+  var builder = initNativeModuleBuilder("http")
+
+  discard builder.command("sse-start", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'sse-start' expects exactly one argument.")
+    let path = requireText(evaluator.evaluateQuoted(args[0], env), "sse-start")
+    if path.len == 0 or path[0] != '/':
+      raise newException(ValueError, "'sse-start' expects a path starting with '/'.")
+    let state = startSseServer(path)
+    newTableValue({
+      "port": newInteger(state.port.int),
+      "path": newText(path),
+      "url": newText("http://127.0.0.1:" & $state.port.int & path)
+    }))
+
+  discard builder.command("sse-publish", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 3:
+      raise newException(ValueError, "'sse-publish' expects exactly three arguments.")
+    let path = requireText(evaluator.evaluateQuoted(args[0], env), "sse-publish")
+    let eventName = requireText(evaluator.evaluateQuoted(args[1], env), "sse-publish")
+    let data = requireText(evaluator.evaluateQuoted(args[2], env), "sse-publish")
+    newBoolean(publishSseEvent(path, eventName, data)))
+
+  discard builder.command("sse-stop", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'sse-stop' expects exactly one argument.")
+    let path = requireText(evaluator.evaluateQuoted(args[0], env), "sse-stop")
+    newBoolean(stopSseServer(path)))
+
+  builder.build()
 
 proc buildSyntaxModule*(): NativeModuleDefinition =
   var builder = initNativeModuleBuilder("syntax")

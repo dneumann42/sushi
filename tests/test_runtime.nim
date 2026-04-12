@@ -1,4 +1,4 @@
-import std/[dynlib, os, osproc, streams, strutils, unittest]
+import std/[dynlib, net, os, osproc, streams, strutils, tables, unittest]
 import ../src/sushi/diagnostics
 import ../src/sushi/[embed, model, runtime]
 import ../src/sushi/native_modules
@@ -105,6 +105,11 @@ proc waitForFileContains(path, needle: string; attempts = 40; delayMs = 100): bo
       return true
     sleep(delayMs)
   false
+
+proc tableField(value: Value; fieldName: string): Value =
+  check value.kind == Table
+  check value.entries.hasKey(newText(fieldName))
+  value.entries[newText(fieldName)]
 
 proc loadSymbol[T](library: LibHandle; symbolName: string): T =
   let symbol = symAddr(library, symbolName)
@@ -905,23 +910,6 @@ end
     let value = runtime.runFile(getCurrentDir() / "scripts" / "prose.sushi")
     check value.kind != Text or not value.textValue.startsWith("error:")
 
-  test "pen demo renders html":
-    let runtime = newTestRuntime()
-    let value = runtime.evaluate("""
-use pen global
-demo-html
-""")
-    check value.kind == Text
-    check "<html lang=\"en\">" in value.textValue
-    check "<title>Pen DSL Demo</title>" in value.textValue
-    check "<img" in value.textValue
-    check "src=\"/hero.png\"" in value.textValue
-    check "alt=\"Pen demo screenshot\"" in value.textValue
-    check "class=\"hero-image\"" in value.textValue
-    check "<meta" in value.textValue
-    check "<link" in value.textValue
-    check "<footer class=\"page-footer\"><small>Built with pen.sushi and the Sushi runtime.</small></footer>" in value.textValue
-
   test "pen doc-string and @ support reusable fragments":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -979,6 +967,7 @@ doc Main \\
       "io.read-file \"" & escapedOutput & "\"\n"
     let value = runtime.evaluate(source)
     check value.kind == Text
+    check value.textValue.startsWith("<!DOCTYPE html>")
     check "<body class=\"test-page\">" in value.textValue
     check "<h1>Hi</h1>" in value.textValue
     check "<p class=\"lede\">Rendered from a source file.</p>" in value.textValue
@@ -987,12 +976,13 @@ doc Main \\
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
 use pen global
-render-file-watch "docs/sushi.pen.sushi"
+render-file-watch "docs/sushi.pen.sushi" "http://127.0.0.1:43127/pen-watch"
 """)
     check value.kind == Text
+    check value.textValue.startsWith("<!DOCTYPE html>")
     check "<title>Sushi</title>" in value.textValue
     check "<style>" in value.textValue
-    check "<script>window.setTimeout(function () { window.location.reload(); }, 1000);</script></head>" in value.textValue
+    check """<script>var source = new EventSource("http://127.0.0.1:43127/pen-watch");window.addEventListener("beforeunload", function () { source.close(); });source.addEventListener("reload", function () { source.close(); window.location.reload(); });</script></head>""" in value.textValue
 
   test "pen renders docs sushi example":
     let runtime = newTestRuntime()
@@ -1001,11 +991,57 @@ use pen global
 render-file "docs/sushi.pen.sushi"
 """)
     check value.kind == Text
-    check "<html lang=\"en\">" in value.textValue
+    check value.textValue.startsWith("<!DOCTYPE html><html lang=\"en\">")
     check "<title>Sushi</title>" in value.textValue
     check "<style>" in value.textValue
     check "<header class=\"hbox\">" in value.textValue
     check "<h1>Hello</h1>" in value.textValue
+
+  test "http sse start returns endpoint info":
+    let runtime = newTestRuntime()
+    let started = runtime.evaluate("""
+use http global
+sse-start "/events"
+""")
+    let portValue = started.tableField("port")
+    let pathValue = started.tableField("path")
+    let urlValue = started.tableField("url")
+    check portValue.kind == Integer
+    check portValue.intValue > 0
+    check pathValue.kind == Text
+    check pathValue.textValue == "/events"
+    check urlValue.kind == Text
+    check urlValue.textValue == "http://127.0.0.1:" & $portValue.intValue & "/events"
+
+    let published = runtime.evaluate("""
+use http global
+sse-publish "/events" "reload" ""
+""")
+    check published.kind == Boolean
+    check published.boolValue
+
+    let stopped = runtime.evaluate("""
+use http global
+sse-stop "/events"
+""")
+    check stopped.kind == Boolean
+    check stopped.boolValue
+
+  test "http sse publish and stop return false for unknown paths":
+    let runtime = newTestRuntime()
+    let published = runtime.evaluate("""
+use http global
+sse-publish "/missing" "reload" ""
+""")
+    check published.kind == Boolean
+    check not published.boolValue
+
+    let stopped = runtime.evaluate("""
+use http global
+sse-stop "/missing"
+""")
+    check stopped.kind == Boolean
+    check not stopped.boolValue
 
   test "file-info returns the last updated unix time":
     let runtime = newTestRuntime()
@@ -1334,6 +1370,7 @@ doc Main \\
     check result.exitCode == 0
     check fileExists(outputPath)
     let output = readFile(outputPath)
+    check output.startsWith("<!DOCTYPE html>")
     check "<body class=\"cli-page\">" in output
     check "<h1>CLI render</h1>" in output
     check "<p>Generated through sushi pen.</p>" in output
@@ -1360,7 +1397,8 @@ doc Main \\
       close(process)
 
     check waitForFileContains(outputPath, "<h1>First</h1>")
-    check waitForFileContains(outputPath, "window.setTimeout(function () { window.location.reload(); }, 1000);")
+    check waitForFileContains(outputPath, "<!DOCTYPE html>")
+    check waitForFileContains(outputPath, "new EventSource(\"http://127.0.0.1:")
 
     sleep(1100)
     writeFile(inputPath, """
