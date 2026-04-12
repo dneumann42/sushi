@@ -1,0 +1,46 @@
+use pen global
+
+var styles "
+  body {
+    margin: 0;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    margin: 0;
+  }
+  .hbox {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+  }
+  .vbox {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+"
+
+fun page-header [title] do
+  doc-string \\
+    header { class "hbox" } \\
+      h1 { } title
+      nav { class "hbox" } \\
+        a { href "#" } "Test"
+        a { href "#" } "About"
+end
+
+fun page [page-title slot] do
+  doc-string \\
+    html { lang "en" } \\
+      head {} \\
+        title-tag { } page-title
+        style { } styles
+      body {} \\
+        @ [page-header "MAIN PAGE"]
+        @ slot
+end
+
+doc Main \\
+  @ [page "Sushi" [doc-string \\
+    h1 "Hello"
+  ]]
+  

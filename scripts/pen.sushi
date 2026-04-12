@@ -2,8 +2,10 @@ use io
 use syntax global
 
 var documents {}
+var watch-mode F
+var reload-script "window.setTimeout(function () { window.location.reload(); }, 1000);"
 
-fun doc [id blk] do
+fun build-html [blk] do
   var parts #[]
 
   fun attrs-html-from [entries index] do
@@ -20,23 +22,42 @@ fun doc [id blk] do
   fun attrs-html [kv] \\
     attrs-html-from [field [serialize kv] "entries"] 0
 
+  fun empty-attrs [] \\ {}
+
   fun text-element [tag kv text] \\
     append parts #[tag kv text]
 
+  fun text-tag-call [tag args] do
+    if ([count args] eq 1) do
+      text-element tag [empty-attrs] args.(0)
+    else
+      text-element tag args.(0) args.(1)
+    end
+  end
+
   fun h [level kv text] \\
     text-element "h\(level)" kv text
+
+  fun style [kv blk] \\ text-element "style" kv blk
 
   fun element [tag kv blk] do
     var parent parts
     var children #[]
     set parts children
     replay blk
+    if [and watch-mode (tag eq "head")] do
+      append parts #["script" [empty-attrs] reload-script]
+    end
     set parts parent
     append parts #[tag kv children]
   end
 
   fun void-element [tag kv] \\
     append parts #[tag kv ""]
+
+  fun @ [html] do
+    append parts [eval-here html]
+  end
 
   fun html [kv blk] \\ element "html" kv blk
   fun head [kv blk] \\ element "head" kv blk
@@ -52,20 +73,56 @@ fun doc [id blk] do
   fun ul [kv blk] \\ element "ul" kv blk
   fun ol [kv blk] \\ element "ol" kv blk
 
-  fun title-tag [kv text] \\ text-element "title" kv text
-  fun p [kv text] \\ text-element "p" kv text
-  fun strong [kv text] \\ text-element "strong" kv text
-  fun em [kv text] \\ text-element "em" kv text
-  fun small [kv text] \\ text-element "small" kv text
-  fun a [kv text] \\ text-element "a" kv text
-  fun button [kv text] \\ text-element "button" kv text
-  fun li [kv text] \\ text-element "li" kv text
-  fun h1 [kv text] \\ h 1 kv text
-  fun h2 [kv text] \\ h 2 kv text
-  fun h3 [kv text] \\ h 3 kv text
-  fun h4 [kv text] \\ h 4 kv text
-  fun h5 [kv text] \\ h 5 kv text
-  fun h6 [kv text] \\ h 6 kv text
+  fun title-tag args \\ text-tag-call "title" args
+  fun p args \\ text-tag-call "p" args
+  fun strong args \\ text-tag-call "strong" args
+  fun em args \\ text-tag-call "em" args
+  fun small args \\ text-tag-call "small" args
+  fun a args \\ text-tag-call "a" args
+  fun button args \\ text-tag-call "button" args
+  fun li args \\ text-tag-call "li" args
+  fun h1 args do
+    if ([count args] eq 1) do
+      h 1 [empty-attrs] args.(0)
+    else
+      h 1 args.(0) args.(1)
+    end
+  end
+  fun h2 args do
+    if ([count args] eq 1) do
+      h 2 [empty-attrs] args.(0)
+    else
+      h 2 args.(0) args.(1)
+    end
+  end
+  fun h3 args do
+    if ([count args] eq 1) do
+      h 3 [empty-attrs] args.(0)
+    else
+      h 3 args.(0) args.(1)
+    end
+  end
+  fun h4 args do
+    if ([count args] eq 1) do
+      h 4 [empty-attrs] args.(0)
+    else
+      h 4 args.(0) args.(1)
+    end
+  end
+  fun h5 args do
+    if ([count args] eq 1) do
+      h 5 [empty-attrs] args.(0)
+    else
+      h 5 args.(0) args.(1)
+    end
+  end
+  fun h6 args do
+    if ([count args] eq 1) do
+      h 6 [empty-attrs] args.(0)
+    else
+      h 6 args.(0) args.(1)
+    end
+  end
 
   fun img [kv] \\ void-element "img" kv
   fun br [kv] \\ void-element "br" kv
@@ -77,17 +134,23 @@ fun doc [id blk] do
 
   fun render-node [node] do
     var item [eval node]
-    var tag item.(0)
-    var kv item.(1)
-    var body item.(2)
-    var tag-node [serialize tag]
-    var tag-text [field tag-node "text"]
-    var body-node [serialize body]
+    var item-node [serialize item]
 
-    if ([field body-node "kind"] eq "sequence") do
-      "<\(tag-text)\(attrs-html kv)>\(into-html body)</\(tag-text)>"
+    if ([field item-node "kind"] eq "text") do
+      field item-node "text"
     else
-      "<\(tag-text)\(attrs-html kv)>\(body)</\(tag-text)>"
+      var tag item.(0)
+      var kv item.(1)
+      var body item.(2)
+      var tag-node [serialize tag]
+      var tag-text [field tag-node "text"]
+      var body-node [serialize body]
+
+      if ([field body-node "kind"] eq "sequence") do
+        "<\(tag-text)\(attrs-html kv)>\(into-html body)</\(tag-text)>"
+      else
+        "<\(tag-text)\(attrs-html kv)>\(body)</\(tag-text)>"
+      end
     end
   end
 
@@ -101,46 +164,107 @@ fun doc [id blk] do
 
   fun into-html [xs] \\ into-html-from xs 0
 
-  set documents.(id) [into-html parts]
+  into-html parts
 end
 
-var page-title "Pen DSL Demo"
-var hero-name "World"
+fun doc [id blk] do
+  set documents.(id) [build-html blk]
+end
 
-doc Main \\
-  html { lang "en" } \\
-    head { } \\
-      meta { charset "utf-8" }
-      meta { name "viewport" content "width=device-width, initial-scale=1" }
-      title-tag { } page-title
-      link { rel "stylesheet" href "/pen.css" }
-    body { class "page-shell" } \\
-      header { class "hero" } \\
-        nav { class "hero-nav" } \\
-          a { href "/" class "brand" } "pen"
-          a { href "/docs" class "nav-link" } "Docs"
-          a { href "/examples" class "nav-link" } "Examples"
-        h1 { class "hero-title" } "Hello, \(hero-name)!"
-        p { class "hero-copy" } "A tiny Sushi DSL can still render a whole page."
-        button { class "primary-action" } "Render demo"
-      main { class "content-grid" } \\
-        section { class "intro card" } \\
-          h2 { } "What it supports"
-          p { } "Named helpers for common tags, inline text nodes, and indentation-driven blocks."
-          ul { class "feature-list" } \\
-            li { } "semantic layout helpers"
-            li { } "list and link helpers"
-            li { } "void tags like meta, link, img, and hr"
-        section { class "media card" } \\
-          h2 { } "Example media"
-          img { src "/hero.png" alt "Pen demo screenshot" class "hero-image" }
-          hr { class "section-rule" }
-          p { } "The renderer now understands common HTML void elements."
-        article { class "notes card" } \\
-          h2 { } "Notes"
-          p { } "Keep the DSL small, but make the example feel like a real document."
-      footer { class "page-footer" } \\
-        small { } "Built with pen.sushi and the Sushi runtime."
+fun doc-string [blk] do
+  build-html blk
+end
 
-io.write-line documents.(Main)
-documents.(Main)
+fun clear-documents [] \\
+  set documents {}
+
+fun render-source-with-options [source reload-mode] do
+  clear-documents
+  set watch-mode reload-mode
+  run source
+  set watch-mode F
+  documents.(Main)
+end
+
+fun render-source [source] do
+  render-source-with-options source F
+end
+
+fun render-file [path] do
+  render-source [io.read-file path]
+end
+
+fun render-file-watch [path] do
+  render-source-with-options [io.read-file path] T
+end
+
+fun write-html-file [input-path output-path] do
+  io.write-file output-path [render-file input-path]
+  output-path
+end
+
+fun write-html-file-watch [input-path output-path] do
+  io.write-file output-path [render-file-watch input-path]
+  output-path
+end
+
+fun watch-html-file [input-path output-path] do
+  write-html-file-watch input-path output-path
+  var last-updated [file-info :last-updated input-path]
+  while T do
+    sleep 1
+    var current-updated [file-info :last-updated input-path]
+    if [not (current-updated eq last-updated)] do
+      write-html-file-watch input-path output-path
+      set last-updated current-updated
+    end
+  end
+end
+
+fun build-demo [] do
+  var page-title "Pen DSL Demo"
+  var hero-name "World"
+
+  doc Main \\
+    html { lang "en" } \\
+      head { } \\
+        meta { charset "utf-8" }
+        meta { name "viewport" content "width=device-width, initial-scale=1" }
+        title-tag { } page-title
+        link { rel "stylesheet" href "/pen.css" }
+      body { class "page-shell" } \\
+        header { class "hero" } \\
+          nav { class "hero-nav" } \\
+            a { href "/" class "brand" } "pen"
+            a { href "/docs" class "nav-link" } "Docs"
+            a { href "/examples" class "nav-link" } "Examples"
+          h1 { class "hero-title" } "Hello, \(hero-name)!"
+          p { class "hero-copy" } "A tiny Sushi DSL can still render a whole page."
+          button { class "primary-action" } "Render demo"
+        main { class "content-grid" } \\
+          section { class "intro card" } \\
+            h2 { } "What it supports"
+            p { } "Named helpers for common tags, inline text nodes, and indentation-driven blocks."
+            ul { class "feature-list" } \\
+              li { } "semantic layout helpers"
+              li { } "list and link helpers"
+              li { } "void tags like meta, link, img, and hr"
+          section { class "media card" } \\
+            h2 { } "Example media"
+            img { src "/hero.png" alt "Pen demo screenshot" class "hero-image" }
+            hr { class "section-rule" }
+            p { } "The renderer now understands common HTML void elements."
+          article { class "notes card" } \\
+            h2 { } "Notes"
+            p { } "Keep the DSL small, but make the example feel like a real document."
+        footer { class "page-footer" } \\
+          small { } "Built with pen.sushi and the Sushi runtime."
+end
+
+fun demo-html [] do
+  clear-documents
+  build-demo
+  documents.(Main)
+end
+
+0

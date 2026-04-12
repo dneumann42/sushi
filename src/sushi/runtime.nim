@@ -996,6 +996,23 @@ proc evalCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     raise newSushiError("Native command 'eval' requires exactly one argument.")
   evaluator.evaluateQuoted(args[0], env)
 
+proc evalHereCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 1:
+    raise newSushiError("Native command 'eval-here' requires exactly one argument.")
+  let resolved = resolveRawValueWithCapture(args[0], evaluator, env)
+  let targetEnv =
+    if resolved.hasCapturedEnv and not resolved.env.isNil:
+      initEnv(
+        env,
+        resolved.env,
+        if not env.isNil and not env.runtimeState.isNil: env.runtimeState else: resolved.env.runtimeState,
+        if not env.isNil: env.currentModule else: resolved.env.currentModule,
+        false
+      )
+    else:
+      env
+  evaluator.evaluateQuoted(resolved.value, targetEnv)
+
 proc evalValueCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len != 1:
     raise newSushiError("Native command 'eval-value' requires exactly one argument.")
@@ -1508,6 +1525,7 @@ proc bindNativeCommands(env: Env) =
     ("var", varCommand),
     ("set", setCommand),
     ("eval", evalCommand),
+    ("eval-here", evalHereCommand),
     ("eval-value", evalValueCommand),
     ("raw", rawCommand),
     ("capture", captureCommand),

@@ -1,4 +1,4 @@
-import std/[colors, math, sequtils, strutils, tables, terminal]
+import std/[colors, math, os, sequtils, strutils, tables, terminal, times]
 when defined(windows):
   import std/winlean
   proc getConsoleMode(hConsoleHandle: Handle; dwMode: ptr DWORD): WINBOOL {.
@@ -22,6 +22,11 @@ proc requireInteger(value: Value; commandName: string): int =
   if value.kind != Integer:
     raise newException(ValueError, "'" & commandName & "' expects integers.")
   value.intValue
+
+proc requireSymbol(value: Value; commandName: string): string =
+  if value.kind != Symbol:
+    raise newException(ValueError, "'" & commandName & "' expects a symbol.")
+  value.symbolValue
 
 proc requireBoolean(value: Value; commandName: string): bool =
   if value.kind != Boolean:
@@ -715,6 +720,22 @@ proc buildIoModule*(): NativeModuleDefinition =
     let path = requireText(evaluator.evaluateQuoted(args[0], env), "write-file")
     let text = requireText(evaluator.evaluateQuoted(args[1], env), "write-file")
     writeFile(path, text)
+    newBoolean(true))
+
+  discard builder.command("file-info", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    let kind = requireSymbol(evaluator.evaluateQuoted(args[0], env), "file-info")
+    let path = requireText(evaluator.evaluateQuoted(args[1], env), "file-info")
+    case kind
+    of ":last-updated":
+      newInteger(getLastModificationTime(path).toUnix().int)
+    else:
+      raise newException(ValueError, "'file-info' does not support kind '" & kind & "'."))
+
+  discard builder.command("sleep", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    let seconds = requireInteger(evaluator.evaluateQuoted(args[0], env), "sleep")
+    if seconds < 0:
+      raise newException(ValueError, "'sleep' expects a non-negative integer.")
+    sleep(seconds * 1000)
     newBoolean(true))
 
   discard builder.command("clear", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =

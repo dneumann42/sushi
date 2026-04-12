@@ -99,6 +99,13 @@ proc withWorkingDir(path: string; body: proc ()) =
   finally:
     setCurrentDir(originalDir)
 
+proc waitForFileContains(path, needle: string; attempts = 40; delayMs = 100): bool =
+  for _ in 0 ..< attempts:
+    if fileExists(path) and needle in readFile(path):
+      return true
+    sleep(delayMs)
+  false
+
 proc loadSymbol[T](library: LibHandle; symbolName: string): T =
   let symbol = symAddr(library, symbolName)
   doAssert not symbol.isNil, "missing symbol: " & symbolName
@@ -898,9 +905,12 @@ end
     let value = runtime.runFile(getCurrentDir() / "scripts" / "prose.sushi")
     check value.kind != Text or not value.textValue.startsWith("error:")
 
-  test "loads pen script and returns rendered html":
+  test "pen demo renders html":
     let runtime = newTestRuntime()
-    let value = runtime.evaluateFile(getCurrentDir() / "scripts" / "pen.sushi")
+    let value = runtime.evaluate("""
+use pen global
+demo-html
+""")
     check value.kind == Text
     check "<html lang=\"en\">" in value.textValue
     check "<title>Pen DSL Demo</title>" in value.textValue
@@ -912,10 +922,127 @@ end
     check "<link" in value.textValue
     check "<footer class=\"page-footer\"><small>Built with pen.sushi and the Sushi runtime.</small></footer>" in value.textValue
 
-  test "runs shipped pen script":
+  test "pen doc-string and @ support reusable fragments":
     let runtime = newTestRuntime()
-    let value = runtime.runFile(getCurrentDir() / "scripts" / "pen.sushi")
-    check value.kind != Text or not value.textValue.startsWith("error:")
+    let value = runtime.evaluate("""
+use pen global
+
+fun my-comp [a] do
+  doc-string \\
+    p "Hello \(a)"
+end
+
+doc Main \\
+  h 1 {} "Test:"
+  @ [my-comp "World!"]
+
+documents.(Main)
+""")
+    check value.kind == Text
+    check "<h1>Test:</h1>" in value.textValue
+    check "<p>Hello World!</p>" in value.textValue
+    check "<raw>" notin value.textValue
+
+  test "pen text helpers support omitted attrs":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use pen global
+
+doc Main \\
+  p "Hello"
+  h1 "Title"
+
+documents.(Main)
+""")
+    check value.kind == Text
+    check "<p>Hello</p>" in value.textValue
+    check "<h1>Title</h1>" in value.textValue
+
+  test "pen renders a sushi file to an html file":
+    let runtime = newTestRuntime()
+    let tempDir = getTempDir() / "sushi-pen-render-test"
+    createDir(tempDir)
+    let inputPath = tempDir / "page.sushi"
+    let outputPath = tempDir / "page.html"
+    writeFile(inputPath, """
+doc Main \\
+  html { lang "en" } \\
+    body { class "test-page" } \\
+      h1 { } "Hi"
+      p { class "lede" } "Rendered from a source file."
+""")
+    let escapedInput = inputPath.replace("\\", "\\\\")
+    let escapedOutput = outputPath.replace("\\", "\\\\")
+    let source = "use pen global\n" &
+      "use io\n" &
+      "write-html-file \"" & escapedInput & "\" \"" & escapedOutput & "\"\n" &
+      "io.read-file \"" & escapedOutput & "\"\n"
+    let value = runtime.evaluate(source)
+    check value.kind == Text
+    check "<body class=\"test-page\">" in value.textValue
+    check "<h1>Hi</h1>" in value.textValue
+    check "<p class=\"lede\">Rendered from a source file.</p>" in value.textValue
+
+  test "pen watch render injects a reload shim":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use pen global
+render-file-watch "docs/sushi.pen.sushi"
+""")
+    check value.kind == Text
+    check "<title>Sushi</title>" in value.textValue
+    check "<style>" in value.textValue
+    check "<script>window.setTimeout(function () { window.location.reload(); }, 1000);</script></head>" in value.textValue
+
+  test "pen renders docs sushi example":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use pen global
+render-file "docs/sushi.pen.sushi"
+""")
+    check value.kind == Text
+    check "<html lang=\"en\">" in value.textValue
+    check "<title>Sushi</title>" in value.textValue
+    check "<style>" in value.textValue
+    check "<header class=\"hbox\">" in value.textValue
+    check "<h1>Hello</h1>" in value.textValue
+
+  test "file-info returns the last updated unix time":
+    let runtime = newTestRuntime()
+    let tempDir = getTempDir() / "sushi-file-info-test"
+    createDir(tempDir)
+    let path = tempDir / "info.txt"
+    writeFile(path, "hello")
+    let escapedPath = path.replace("\\", "\\\\")
+    let value = runtime.evaluate("""
+use io global
+file-info :last-updated """ & "\"" & escapedPath & "\"\n")
+    check value.kind == Integer
+    check value.intValue > 0
+
+  test "file-info rejects unsupported kinds":
+    let runtime = newTestRuntime()
+    let tempDir = getTempDir() / "sushi-file-info-kind-test"
+    createDir(tempDir)
+    let path = tempDir / "info.txt"
+    writeFile(path, "hello")
+    let escapedPath = path.replace("\\", "\\\\")
+    try:
+      discard runtime.evaluate("""
+use io global
+file-info :bogus """ & "\"" & escapedPath & "\"\n")
+      fail()
+    except SushiError as err:
+      check err.msg.contains("'file-info' does not support kind ':bogus'.")
+
+  test "sleep accepts integer seconds":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+use io global
+sleep 0
+""")
+    check value.kind == Boolean
+    check value.boolValue
 
   test "parses printable terminal input":
     let runtime = newTestRuntime()
@@ -1186,6 +1313,65 @@ answer
     let result = execCmdEx(binaryPath.quoteShell & " noop", workingDir = tempDir)
     check result.exitCode == 1
     check "Usage: sushi [--run <path>]" in result.output
+    check "sushi pen <input.sushi> <output.html>" in result.output
+    check "sushi pen --watch <input.sushi> <output.html>" in result.output
+
+  test "cli pen renders a sushi file to html":
+    buildBinary()
+    let tempDir = getTempDir() / "sushi-pen-cli-test"
+    createDir(tempDir)
+    let inputPath = tempDir / "page.sushi"
+    let outputPath = tempDir / "page.html"
+    writeFile(inputPath, """
+doc Main \\
+  html { lang "en" } \\
+    body { class "cli-page" } \\
+      h1 { } "CLI render"
+      p { } "Generated through sushi pen."
+""")
+    let command = binaryPath.quoteShell & " pen " & inputPath.quoteShell & " " & outputPath.quoteShell
+    let result = execCmdEx(command, workingDir = projectRoot)
+    check result.exitCode == 0
+    check fileExists(outputPath)
+    let output = readFile(outputPath)
+    check "<body class=\"cli-page\">" in output
+    check "<h1>CLI render</h1>" in output
+    check "<p>Generated through sushi pen.</p>" in output
+
+  test "cli pen watch regenerates html after the source changes":
+    buildBinary()
+    let tempDir = getTempDir() / "sushi-pen-watch-cli-test"
+    createDir(tempDir)
+    let inputPath = tempDir / "page.sushi"
+    let outputPath = tempDir / "page.html"
+    writeFile(inputPath, """
+doc Main \\
+  html { lang "en" } \\
+    head { } \\
+      title-tag { } "Watch Test"
+    body { class "watch-page" } \\
+      h1 { } "First"
+""")
+    let process = startProcess(binaryPath, workingDir = projectRoot,
+      args = @["pen", "--watch", inputPath, outputPath], options = {poStdErrToStdOut})
+    defer:
+      terminate(process)
+      discard waitForExit(process)
+      close(process)
+
+    check waitForFileContains(outputPath, "<h1>First</h1>")
+    check waitForFileContains(outputPath, "window.setTimeout(function () { window.location.reload(); }, 1000);")
+
+    sleep(1100)
+    writeFile(inputPath, """
+doc Main \\
+  html { lang "en" } \\
+    head { } \\
+      title-tag { } "Watch Test"
+    body { class "watch-page" } \\
+      h1 { } "Second"
+""")
+    check waitForFileContains(outputPath, "<h1>Second</h1>", attempts = 50, delayMs = 150)
 
   test "repl exposes the previous result through underscore":
     buildBinary()

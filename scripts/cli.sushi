@@ -1,38 +1,64 @@
+use io global
+
+var status 1
+
 if (argc eq 0) do
     use repl
-    0
-end do
+    set status 0
+end
+
+if (argc > 0) do
     cond do
         (argv.(0) eq "fmt"): do
             use format global
             if (argc eq 2) do
                 write-line [format-file argv.(1)]
-                0
+                set status 0
             end do
                 if ((argc eq 3) and (argv.(1) eq "--write")) do
                     write-formatted-file argv.(2)
-                    0
+                    set status 0
                 end do
                     write-line "Usage: sushi fmt <path>"
                     write-line "       sushi fmt --write <path>"
-                    1
+                    set status 1
+                end
+            end
+        end
+        (argv.(0) eq "pen"): do
+            use pen global
+            if (argc eq 3) do
+                write-html-file argv.(1) argv.(2)
+                set status 0
+            end do
+                if ((argc eq 4) and (argv.(1) eq "--watch")) do
+                    watch-html-file argv.(2) argv.(3)
+                    set status 0
+                end do
+                    write-line "Usage: sushi pen <input.sushi> <output.html>"
+                    write-line "       sushi pen --watch <input.sushi> <output.html>"
+                    set status 1
                 end
             end
         end
         ((argv.(0) eq "-r") or (argv.(0) eq "--run")): do
             if (argc eq 2) do
                 run-file argv.(1)
-                0
+                set status 0
             end do
                 write-line "Usage: sushi --run <path>"
-                1
+                set status 1
             end
         end
         T: do
             write-line "Usage: sushi [--run <path>]"
             write-line "       sushi fmt <path>"
             write-line "       sushi fmt --write <path>"
-            1
+            write-line "       sushi pen <input.sushi> <output.html>"
+            write-line "       sushi pen --watch <input.sushi> <output.html>"
+            set status 1
         end
     end
 end
+
++ status 0
