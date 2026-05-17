@@ -21,6 +21,11 @@ sushi pen input.sushi output.html
 sushi pen --watch input.sushi output.html
 ```
 
+## Editor support
+
+A VS Code extension with Sushi syntax highlighting lives in `editors/vscode`.
+Run `editors/vscode/package-vsix.sh`, then install the generated `.vsix` through VS Code's `Install from VSIX...` command.
+
 ## A small demo
 
 ```sushi

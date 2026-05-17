@@ -1,0 +1,199 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Sushi",
+  "scopeName": "source.sushi",
+  "fileTypes": [
+    "sushi"
+  ],
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#keyword-symbol"
+    },
+    {
+      "include": "#boolean"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#block-keyword"
+    },
+    {
+      "include": "#definition"
+    },
+    {
+      "include": "#builtin"
+    },
+    {
+      "include": "#operator"
+    },
+    {
+      "include": "#delimiter"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.sushi",
+          "match": ";.*$"
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.sushi",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.sushi"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.sushi"
+            }
+          },
+          "patterns": [
+            {
+              "name": "meta.interpolation.sushi",
+              "begin": "\\\\\\(",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.begin.sushi"
+                }
+              },
+              "end": "\\)",
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.interpolation.end.sushi"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "$self"
+                }
+              ]
+            },
+            {
+              "name": "constant.character.escape.sushi",
+              "match": "\\\\(?:[nrt\\\\\"]|.)"
+            }
+          ]
+        }
+      ]
+    },
+    "keyword-symbol": {
+      "patterns": [
+        {
+          "name": "constant.other.keyword-symbol.sushi",
+          "match": "(?<![A-Za-z0-9_-]):[A-Za-z_][A-Za-z0-9_-]*\\b"
+        }
+      ]
+    },
+    "boolean": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.sushi",
+          "match": "(?<![A-Za-z0-9_-])(?:T|F)(?![A-Za-z0-9_-])"
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.sushi",
+          "match": "(?<![A-Za-z0-9_-])\\d+(?:\\.\\d+)?(?![A-Za-z0-9_-])"
+        }
+      ]
+    },
+    "block-keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.sushi",
+          "match": "(?<![A-Za-z0-9_-])(?:do|end|else|elif)(?![A-Za-z0-9_-])"
+        },
+        {
+          "name": "keyword.operator.logical.sushi",
+          "match": "(?<![A-Za-z0-9_-])(?:and|or|not|eq|not-eq)(?![A-Za-z0-9_-])"
+        }
+      ]
+    },
+    "definition": {
+      "patterns": [
+        {
+          "name": "meta.function.definition.sushi",
+          "match": "(?<![A-Za-z0-9_-])(fun)\\s+([A-Za-z_][A-Za-z0-9_-]*|[-!$%&*+.\\/:<=>?@^~]+)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.function.sushi"
+            },
+            "2": {
+              "name": "entity.name.function.sushi"
+            }
+          }
+        },
+        {
+          "name": "meta.class.definition.sushi",
+          "match": "(?<![A-Za-z0-9_-])(class|record)\\s+([A-Za-z_][A-Za-z0-9_-]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.class.sushi"
+            },
+            "2": {
+              "name": "entity.name.type.class.sushi"
+            }
+          }
+        },
+        {
+          "name": "keyword.declaration.variable.sushi",
+          "match": "(?<![A-Za-z0-9_-])(?:var|let|set)(?![A-Za-z0-9_-])"
+        },
+        {
+          "name": "keyword.declaration.function.anonymous.sushi",
+          "match": "(?<![A-Za-z0-9_-])fn(?![A-Za-z0-9_-])"
+        }
+      ]
+    },
+    "builtin": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.sushi",
+          "match": "(?<![A-Za-z0-9_-])(?:if|cond|while|eval|eval-here|eval-value|raw|capture|capture-source|replay|read-line|error|error-at|catch|run|run-file|new|use|iterate|command-count|command-at|object-count|object-at|count|length|at|list|table|append|is-block|table-values|array|assert|write|write-line|write-error|write-error-line|concat|repeat|contains|readline|readline-history-add|read-file|write-file|file-info|sleep|clear|width|height|getch|read-key-sequence|char|drop-last|set-cursor-visible|set-cursor|set-fg|set-bg|reset-color|sse-start|sse-publish|sse-stop|parse-source|serialize|text|symbol|command|block|eval-node|field|binary-search|arity|clamp|mod|generate-html|echo|each|for|do-times)(?![A-Za-z0-9_-])"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.sushi",
+          "match": "[-!$%&*+.\\/:<=>?@^~]*="
+        },
+        {
+          "name": "keyword.operator.sushi",
+          "match": "[-!$%&*+.\\/:<=>?@^~]+"
+        },
+        {
+          "name": "constant.other.block-shorthand.sushi",
+          "match": "\\\\\\\\"
+        }
+      ]
+    },
+    "delimiter": {
+      "patterns": [
+        {
+          "name": "punctuation.section.brackets.sushi",
+          "match": "#?\\[|\\]|\\{|\\}|\\(|\\)"
+        }
+      ]
+    }
+  }
+}

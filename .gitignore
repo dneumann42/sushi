@@ -13,3 +13,4 @@ nimcache-*/
 .nide.json
 .codex
 build
+*.vsix
