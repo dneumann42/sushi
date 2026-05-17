@@ -41,6 +41,16 @@ if (argc > 0) do
                 end
             end
         end
+        (argv.(0) eq "docs"): do
+            use docs
+            if (argc eq 2) do
+                docs.generate-html argv.(1)
+                set status 0
+            end do
+                write-line "Usage: sushi docs <output.html>"
+                set status 1
+            end
+        end
         ((argv.(0) eq "-r") or (argv.(0) eq "--run")): do
             if (argc eq 2) do
                 run-file argv.(1)
@@ -56,6 +66,7 @@ if (argc > 0) do
             write-line "       sushi fmt --write <path>"
             write-line "       sushi pen <input.sushi> <output.html>"
             write-line "       sushi pen --watch <input.sushi> <output.html>"
+            write-line "       sushi docs <output.html>"
             set status 1
         end
     end

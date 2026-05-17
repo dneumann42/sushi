@@ -28,6 +28,7 @@ type
 
   ValueObj* = object
     span*: SourceSpan
+    docString*: string
     case kind*: ValueKind
     of Nil:
       discard
@@ -90,6 +91,8 @@ type
     name*: string
     implementation*: NativeCommandProc
     span*: SourceSpan
+    docString*: string
+    signature*: string
 
   userCommandKind* = ref object
     name*: string
@@ -272,11 +275,18 @@ proc initEnv*(parent, fallback: Env; runtimeState: RuntimeState; currentModule: 
 proc initNativeModuleBuilder*(name: string): NativeModuleBuilder =
   NativeModuleBuilder(name: name, exports: initOrderedTable[string, Value]())
 
-proc command*(builder: var NativeModuleBuilder; name: string; implementation: NativeCommandProc): var NativeModuleBuilder =
-  builder.exports[name] = newNativeCommandValue(nativeCommandKind(name: name, implementation: implementation))
+proc command*(builder: var NativeModuleBuilder; name: string; implementation: NativeCommandProc;
+    docString = ""; signature = ""): var NativeModuleBuilder =
+  builder.exports[name] = newNativeCommandValue(nativeCommandKind(
+    name: name,
+    implementation: implementation,
+    docString: docString,
+    signature: if signature.len > 0: signature else: name
+  ))
   builder
 
-proc value*(builder: var NativeModuleBuilder; name: string; v: Value): var NativeModuleBuilder =
+proc value*(builder: var NativeModuleBuilder; name: string; v: Value; docString = ""): var NativeModuleBuilder =
+  v.docString = docString
   builder.exports[name] = v
   builder
 

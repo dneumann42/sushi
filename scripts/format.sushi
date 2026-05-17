@@ -398,14 +398,17 @@ fun format-node [node depth] do
     eval body
 end
 
+;;; Formats Sushi source text into the canonical formatter style.
 fun format-source [source] do
     format-node [parse-source source "<format>"] 0
 end
 
+;;; Reads and formats a Sushi source file.
 fun format-file [path] do
     format-source [io.read-file path]
 end
 
+;;; Rewrites a Sushi source file with canonical formatting.
 fun write-formatted-file [path] do
     io.write-file path [format-file path]
 end

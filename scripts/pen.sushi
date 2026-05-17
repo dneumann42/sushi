@@ -171,10 +171,12 @@ fun build-html [blk] do
   into-html parts
 end
 
+;;; Defines a named Pen document by rendering a block of HTML DSL commands.
 fun doc [id blk] do
   set documents.(id) [build-html blk]
 end
 
+;;; Renders a block of HTML DSL commands directly to a string.
 fun doc-string [blk] do
   build-html blk
 end
@@ -193,10 +195,12 @@ fun render-source-with-options [source watch-endpoint] do
   top-level-html documents.(Main)
 end
 
+;;; Renders Pen source text to a complete HTML document string.
 fun render-source [source] do
   render-source-with-options source F
 end
 
+;;; Reads and renders a Pen source file to a complete HTML document string.
 fun render-file [path] do
   render-source [io.read-file path]
 end
@@ -205,6 +209,7 @@ fun render-file-watch [path watch-endpoint] do
   render-source-with-options [io.read-file path] watch-endpoint
 end
 
+;;; Renders a Pen source file and writes the resulting HTML file.
 fun write-html-file [input-path output-path] do
   io.write-file output-path [render-file input-path]
   output-path
@@ -215,6 +220,7 @@ fun write-html-file-watch [input-path output-path watch-endpoint] do
   output-path
 end
 
+;;; Watches a Pen source file and regenerates HTML with browser reload support.
 fun watch-html-file [input-path output-path] do
   var generation 0
   var current-path "/pen-watch-\(generation)"

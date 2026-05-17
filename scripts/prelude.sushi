@@ -1,13 +1,18 @@
 use syntax
 
+;;; Writes a value followed by a newline.
 fun echo [str] do
     write-line str
 end
 
+;;; Iterates over values produced by an iterator callable.
+;;; The current item is bound to the requested name while the body runs.
 fun each [item iterator body] do
     iterate item iterator body
 end
 
+;;; Iterates from start to stop, inclusive.
+;;; The loop variable is named by the first argument, and descending ranges are supported.
 fun for [item start stop body] do
     var current [eval start]
     var end-value [eval stop]
@@ -40,6 +45,7 @@ fun for [item start stop body] do
     iterate item [eval next] body
 end
 
+;;; Runs a block n times with `it` bound to the current zero-based index.
 fun do-times [n blk] do
     var do-times-count [eval-value n]
     var do-times-index 0
@@ -125,6 +131,8 @@ fun record-build-class [name-node field-nodes] do
         [syntax.block body-commands]]
 end
 
+;;; Defines a simple record class with an initializer and field setter methods.
+;;; Example: `record Point x y` creates a `Point` class with `x` and `y` fields.
 fun record args do
     if ([count args] eq 0) do
         error "record expects at least a name."

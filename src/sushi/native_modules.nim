@@ -1,4 +1,4 @@
-import std/[colors, locks, math, net, os, sequtils, strutils, tables, terminal, times]
+import std/[algorithm, colors, locks, math, net, os, sequtils, strutils, tables, terminal, times]
 when defined(windows):
   import std/winlean
   proc getConsoleMode(hConsoleHandle: Handle; dwMode: ptr DWORD): WINBOOL {.
@@ -6,6 +6,7 @@ when defined(windows):
 else:
   import std/[posix, termios]
 import diagnostics
+import builtin_scripts
 import parser
 import model
 import runtime
@@ -42,6 +43,289 @@ proc requireSequence(value: Value; commandName: string): Value =
   if value.kind != Sequence:
     raise newException(ValueError, "'" & commandName & "' expects a list.")
   value
+
+type
+  ScriptDoc = object
+    moduleName: string
+    kind: string
+    name: string
+    signature: string
+    docString: string
+
+proc moduleDisplayName(sourceName: string): string =
+  if sourceName.startsWith("<builtin:") and sourceName.endsWith(">"):
+    return sourceName["<builtin:".len ..< sourceName.len - 1].changeFileExt("")
+  splitFile(sourceName).name
+
+proc cleanDocComment(text: string): string =
+  result = if text.len <= 3: "" else: text[3 .. ^1]
+  if result.startsWith(" "):
+    result = result[1 .. ^1]
+
+proc leadingDocString(command: Value; comments: seq[CommentTrivia]): string =
+  if command.span.isEmpty:
+    return ""
+  var lines: seq[string]
+  var expectedLine = command.span.startLocation.line - 1
+  if expectedLine < 1:
+    return ""
+  for i in countdown(comments.high, 0):
+    let comment = comments[i]
+    if comment.span.finish > command.span.start:
+      continue
+    let line = comment.span.startLocation.line
+    if line != expectedLine:
+      break
+    if comment.hasCodeBefore or not comment.text.startsWith(";;;"):
+      return ""
+    lines.add(cleanDocComment(comment.text))
+    dec expectedLine
+  lines.reverse()
+  lines.join("\n").strip()
+
+proc commandSignature(command: Value): string =
+  if command.kind != Command:
+    return ""
+  let objects =
+    if command.objects.len > 0 and command.objects[^1].kind == Block:
+      command.objects[0 ..< command.objects.high]
+    else:
+      command.objects
+  objects.mapIt(formatValue(it)).join(" ")
+
+proc declarationDoc(command: Value; moduleName: string; comments: seq[CommentTrivia]): ScriptDoc =
+  if command.kind != Command or command.objects.len < 2 or command.objects[0].kind != Symbol:
+    return
+  let head = command.objects[0].symbolValue
+  if head notin ["fun", "class", "var"] or command.objects[1].kind != Symbol:
+    return
+  let docString = leadingDocString(command, comments)
+  if docString.len == 0:
+    return
+  ScriptDoc(
+    moduleName: moduleName,
+    kind: head,
+    name: command.objects[1].symbolValue,
+    signature: commandSignature(command),
+    docString: docString
+  )
+
+proc collectScriptDocs(): seq[ScriptDoc] =
+  for script in embeddedScripts():
+    let source = newSourceFile(script.sourceName, script.source)
+    let ast = parseScript(source)
+    let comments = scanComments(source)
+    let moduleName = moduleDisplayName(script.sourceName)
+    for command in ast.commands:
+      let doc = declarationDoc(command, moduleName, comments)
+      if doc.docString.len > 0:
+        result.add(doc)
+
+proc htmlEscape(text: string): string =
+  for ch in text:
+    case ch
+    of '&':
+      result.add("&amp;")
+    of '<':
+      result.add("&lt;")
+    of '>':
+      result.add("&gt;")
+    of '"':
+      result.add("&quot;")
+    of '\'':
+      result.add("&#39;")
+    else:
+      result.add(ch)
+
+proc paragraphHtml(text: string): string =
+  var paragraphs: seq[string]
+  for part in text.split("\n\n"):
+    let trimmed = part.strip()
+    if trimmed.len > 0:
+      paragraphs.add("<p>" & htmlEscape(trimmed).replace("\n", "<br>") & "</p>")
+  paragraphs.join("\n")
+
+proc nativeDocFallback(moduleName, name: string): string =
+  case moduleName & "." & name
+  of "io.write": "Writes one or more values to standard output without adding newlines."
+  of "io.write-line": "Writes one or more values to standard output, each followed by a newline."
+  of "io.write-error": "Writes a value to standard error without adding a newline."
+  of "io.write-error-line": "Writes one or more values to standard error, each followed by a newline."
+  of "io.concat": "Concatenates any number of text values."
+  of "io.repeat": "Repeats a text value a non-negative number of times."
+  of "io.contains": "Returns true when text contains the requested substring."
+  of "io.read-line": "Reads one line from standard input, or false at end of input."
+  of "io.readline": "Reads one line with an optional prompt and interactive line-editing support."
+  of "io.readline-history-add": "Adds an entry to the interactive readline history."
+  of "io.read-file": "Reads an entire file as text."
+  of "io.write-file": "Writes text to a file, replacing its contents."
+  of "io.file-info": "Returns file metadata such as `:last-updated`."
+  of "io.sleep": "Sleeps for a non-negative number of seconds."
+  of "io.clear": "Clears the terminal and moves the cursor home."
+  of "io.width": "Returns the terminal width in columns."
+  of "io.height": "Returns the terminal height in rows."
+  of "io.getch": "Reads one character from the terminal."
+  of "io.read-key-sequence": "Reads a raw terminal key sequence."
+  of "io.char": "Converts a byte-sized integer to a one-character text value."
+  of "io.drop-last": "Drops the final byte from a text value."
+  of "io.set-cursor-visible": "Shows or hides the terminal cursor."
+  of "io.set-cursor": "Moves the terminal cursor to an x/y position."
+  of "io.set-fg": "Sets the terminal foreground color by name."
+  of "io.set-bg": "Sets the terminal background color by name."
+  of "io.reset-color": "Resets terminal colors and attributes."
+  of "http.sse-start": "Starts a local server-sent events endpoint and returns its connection details."
+  of "http.sse-publish": "Publishes an event and data payload to clients connected to an SSE endpoint."
+  of "http.sse-stop": "Stops a local server-sent events endpoint."
+  of "syntax.parse-source": "Parses Sushi source text into a serialized syntax tree with comments."
+  of "syntax.serialize": "Serializes a Sushi value into an AST node table."
+  of "syntax.text": "Extracts text from a serialized symbol AST node."
+  of "syntax.symbol": "Builds a serialized symbol AST node from text."
+  of "syntax.command": "Builds a serialized command AST node from serialized objects."
+  of "syntax.block": "Builds a serialized block AST node from serialized commands."
+  of "syntax.eval-node": "Evaluates a serialized AST node, optionally using another captured scope."
+  of "syntax.field": "Returns a text-keyed table field, or nil when the field is absent."
+  of "base.binary-search": "Performs a binary search over a sorted Sushi list and returns the found index or insertion marker."
+  of "base.arity": "Returns the arity, or remaining dimensionality, of an array."
+  of "math.clamp": "Clamps an integer or real value between inclusive bounds of the same type."
+  of "math.mod": "Returns the integer remainder of left divided by right."
+  of "docs.generate-html": "Generates a standalone HTML reference page for native modules, core commands, and documented Sushi scripts."
+  else: ""
+
+proc nativeDocString(moduleName, name: string; value: Value): string =
+  case value.kind
+  of NativeCommand:
+    if value.nativeCommand.docString.len > 0: value.nativeCommand.docString else: nativeDocFallback(moduleName, name)
+  else:
+    if value.docString.len > 0: value.docString else: nativeDocFallback(moduleName, name)
+
+proc nativeSignatureFallback(moduleName, name: string): string =
+  case moduleName & "." & name
+  of "io.write": "io.write values..."
+  of "io.write-line": "io.write-line [values...]"
+  of "io.write-error": "io.write-error value"
+  of "io.write-error-line": "io.write-error-line [values...]"
+  of "io.concat": "io.concat text..."
+  of "io.repeat": "io.repeat text count"
+  of "io.contains": "io.contains text needle"
+  of "io.read-line": "io.read-line"
+  of "io.readline": "io.readline [prompt]"
+  of "io.readline-history-add": "io.readline-history-add entry"
+  of "io.read-file": "io.read-file path"
+  of "io.write-file": "io.write-file path text"
+  of "io.file-info": "io.file-info kind path"
+  of "io.sleep": "io.sleep seconds"
+  of "io.clear": "io.clear"
+  of "io.width": "io.width"
+  of "io.height": "io.height"
+  of "io.getch": "io.getch"
+  of "io.read-key-sequence": "io.read-key-sequence"
+  of "io.char": "io.char code"
+  of "io.drop-last": "io.drop-last text"
+  of "io.set-cursor-visible": "io.set-cursor-visible visible"
+  of "io.set-cursor": "io.set-cursor x y"
+  of "io.set-fg": "io.set-fg color-name"
+  of "io.set-bg": "io.set-bg color-name"
+  of "io.reset-color": "io.reset-color"
+  of "http.sse-start": "http.sse-start path"
+  of "http.sse-publish": "http.sse-publish path event-name data"
+  of "http.sse-stop": "http.sse-stop path"
+  of "syntax.parse-source": "syntax.parse-source source [source-name]"
+  of "syntax.serialize": "syntax.serialize value"
+  of "syntax.text": "syntax.text symbol-node"
+  of "syntax.symbol": "syntax.symbol text"
+  of "syntax.command": "syntax.command objects"
+  of "syntax.block": "syntax.block commands"
+  of "syntax.eval-node": "syntax.eval-node node [scope]"
+  of "syntax.field": "syntax.field table key"
+  of "base.binary-search": "base.binary-search list target"
+  of "base.arity": "base.arity array"
+  of "math.clamp": "math.clamp value min max"
+  of "math.mod": "math.mod left right"
+  of "docs.generate-html": "docs.generate-html output-path"
+  else: name
+
+proc nativeSignature(moduleName, name: string; value: Value): string =
+  case value.kind
+  of NativeCommand:
+    if value.nativeCommand.signature.len > 0 and (moduleName == "core" or value.nativeCommand.signature != name):
+      value.nativeCommand.signature
+    else:
+      nativeSignatureFallback(moduleName, name)
+  else:
+    if moduleName.len > 0: moduleName & "." & name else: name
+
+proc renderDocPage*(env: Env): string =
+  var htmlText = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sushi Standard Library</title>
+<style>
+:root { color-scheme: light; --ink: #1f2933; --muted: #607080; --line: #d7dde5; --panel: #f7f9fb; --accent: #0f766e; }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: #fff; }
+header { padding: 48px max(24px, calc((100vw - 1120px) / 2)) 28px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #f8fbfb 0%, #fff 100%); }
+main { max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }
+h1 { margin: 0 0 8px; font-size: 40px; line-height: 1.1; }
+h2 { margin: 36px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 24px; }
+h3 { margin: 0; font-size: 18px; }
+p { margin: 8px 0 0; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.entry { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: var(--panel); }
+.signature { margin-top: 6px; font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--accent); overflow-wrap: anywhere; }
+.kind { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+nav a { color: var(--accent); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+<h1>Sushi Standard Library</h1>
+<p>Native modules, core commands, and documented Sushi library exports.</p>
+<nav>"""
+
+  if not env.isNil and not env.runtimeState.isNil:
+    htmlText.add """<a href="#core">Core</a>"""
+    for moduleName, _ in env.runtimeState.nativeModulesByName.pairs:
+      htmlText.add "<a href=\"#" & htmlEscape(moduleName) & "\">" & htmlEscape(moduleName) & "</a>"
+  htmlText.add """<a href="#scripts">Scripts</a></nav></header><main>"""
+
+  if not env.isNil and not env.runtimeState.isNil and not env.runtimeState.rootEnv.isNil:
+    htmlText.add """<section id="core"><h2>Core</h2><div class="grid">"""
+    for name, value in env.runtimeState.rootEnv.bindings.pairs:
+      if value.kind == NativeCommand:
+        htmlText.add "<article class=\"entry\"><div class=\"kind\">native command</div><h3>" & htmlEscape(name) &
+          "</h3><div class=\"signature\">" & htmlEscape(nativeSignature("core", name, value)) & "</div>" &
+          paragraphHtml(nativeDocString("core", name, value)) & "</article>"
+    htmlText.add "</div></section>"
+
+    for moduleName, moduleValue in env.runtimeState.nativeModulesByName.pairs:
+      htmlText.add "<section id=\"" & htmlEscape(moduleName) & "\"><h2>" & htmlEscape(moduleName) & "</h2><div class=\"grid\">"
+      for name, value in moduleValue.exports.pairs:
+        let kind = if value.kind == NativeCommand: "native command" else: "native value"
+        htmlText.add "<article class=\"entry\"><div class=\"kind\">" & kind & "</div><h3>" & htmlEscape(name) &
+          "</h3><div class=\"signature\">" & htmlEscape(nativeSignature(moduleName, name, value)) & "</div>" &
+          paragraphHtml(nativeDocString(moduleName, name, value)) & "</article>"
+      htmlText.add "</div></section>"
+
+  let scriptDocs = collectScriptDocs()
+  htmlText.add """<section id="scripts"><h2>Scripts</h2>"""
+  var currentModule = ""
+  var opened = false
+  for doc in scriptDocs:
+    if doc.moduleName != currentModule:
+      if opened:
+        htmlText.add "</div>"
+      currentModule = doc.moduleName
+      htmlText.add "<h2>" & htmlEscape(currentModule) & "</h2><div class=\"grid\">"
+      opened = true
+    htmlText.add "<article class=\"entry\"><div class=\"kind\">" & htmlEscape(doc.kind) & "</div><h3>" &
+      htmlEscape(doc.name) & "</h3><div class=\"signature\">" & htmlEscape(doc.signature) & "</div>" &
+      paragraphHtml(doc.docString) & "</article>"
+  if opened:
+    htmlText.add "</div>"
+  htmlText.add "</section></main></body></html>"
+  htmlText
 
 type
   SseServerState = ref object
@@ -1200,4 +1484,14 @@ proc buildMathModule*(): NativeModuleDefinition =
     if left.kind != Integer or right.kind != Integer:
       raise newException(ValueError, "Expected number.")
     newInteger(left.intValue mod right.intValue))
+  builder.build
+
+proc buildDocsModule*(): NativeModuleDefinition =
+  var builder = initNativeModuleBuilder("docs")
+  discard builder.command("generate-html", proc (evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+    if args.len != 1:
+      raise newException(ValueError, "'generate-html' expects exactly one output path.")
+    let outputPath = requireText(evaluator.evaluateQuoted(args[0], env), "generate-html")
+    writeFile(outputPath, renderDocPage(env))
+    newText(outputPath))
   builder.build

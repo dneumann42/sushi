@@ -1,5 +1,7 @@
+;;; Registry of dialogues created by the prose DSL.
 var dialogues {}
 
+;;; A selectable response in a dialogue verse.
 class Response [] do
     field text next-verse-id
 
@@ -9,6 +11,7 @@ class Response [] do
     end
 end
 
+;;; A dialogue verse with text, optional branching responses, and a next verse.
 class Verse [] do
     field id text next-verse-id responses body
 
@@ -42,6 +45,7 @@ class Verse [] do
     end
 end
 
+;;; A complete dialogue definition with verses and a starting verse.
 class Dialogue [] do
     field dialog-id verses starting-verse-id
     fun init [id] do
@@ -65,6 +69,7 @@ class Dialogue [] do
     end
 end
 
+;;; Defines a dialogue through the prose DSL and stores it in the dialogue registry.
 fun dialogue [dialog-id blk] do
     var d [new Dialogue dialog-id]
 

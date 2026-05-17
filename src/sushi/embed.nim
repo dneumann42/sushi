@@ -10,6 +10,7 @@ proc newEmbeddedRuntime*(args: seq[string] = @[]): SushiRuntime =
     .registerNativeModule(buildBaseModule())
     .registerNativeModule(buildMathModule())
     .registerNativeModule(buildSyntaxModule())
+    .registerNativeModule(buildDocsModule())
   result.loadPrelude()
 
 proc evaluateToString*(runtime: SushiRuntime; source: string): string =

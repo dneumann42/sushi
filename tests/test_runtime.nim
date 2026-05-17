@@ -1297,6 +1297,33 @@ format-file """ & "\"" & path.replace("\\", "\\\\") & "\"" & """
     check value.kind == Text
     check value.textValue == "+ 4 5"
 
+  test "native builder stores optional docs":
+    var builder = initNativeModuleBuilder("sample")
+    proc ping(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+      discard evaluator
+      discard env
+      discard args
+      newText("pong")
+    discard builder.command("ping", ping, "Returns pong.", "ping value")
+    discard builder.value("answer", newInteger(42), "The answer value.")
+    let definition = builder.build()
+    check definition.exports["ping"].kind == NativeCommand
+    check definition.exports["ping"].nativeCommand.docString == "Returns pong."
+    check definition.exports["ping"].nativeCommand.signature == "ping value"
+    check definition.exports["answer"].docString == "The answer value."
+
+  test "docs generator includes native and documented script exports":
+    let runtime = newTestRuntime()
+    let html = renderDocPage(runtime.environment)
+    check "<h2>io</h2>" in html
+    check "io.write-line [values...]" in html
+    check "if condition do ... end [do ... end]" in html
+    check "Writes one or more values to standard output" in html
+    check "<h2>prelude</h2>" in html
+    check "fun record args" in html
+    check "Defines a simple record class" in html
+    check "record-set-command" notin html
+
   test "runs sushi through the dynamic library":
     buildDynamicLibrary()
 
@@ -1351,6 +1378,23 @@ answer
     check "Usage: sushi [--run <path>]" in result.output
     check "sushi pen <input.sushi> <output.html>" in result.output
     check "sushi pen --watch <input.sushi> <output.html>" in result.output
+    check "sushi docs <output.html>" in result.output
+
+  test "cli docs generates a standard library html page":
+    buildBinary()
+    let tempDir = getTempDir() / "sushi-docs-cli-test"
+    createDir(tempDir)
+    let outputPath = tempDir / "sushi-docs.html"
+    let command = binaryPath.quoteShell & " docs " & outputPath.quoteShell
+    let result = execCmdEx(command, workingDir = projectRoot)
+    check result.exitCode == 0
+    check fileExists(outputPath)
+    let output = readFile(outputPath)
+    check output.startsWith("<!doctype html>")
+    check "Sushi Standard Library" in output
+    check "io.write-line [values...]" in output
+    check "docs.generate-html output-path" in output
+    check "fun record args" in output
 
   test "cli pen renders a sushi file to html":
     buildBinary()

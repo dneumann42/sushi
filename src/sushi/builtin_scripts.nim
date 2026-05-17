@@ -32,6 +32,10 @@ proc findEmbeddedScript*(fileName: string): Option[EmbeddedScript] =
       return some(EmbeddedScript(sourceName: entry.sourceName, source: entry.source))
   none(EmbeddedScript)
 
+proc embeddedScripts*(): seq[EmbeddedScript] =
+  for entry in embeddedScriptEntries:
+    result.add(EmbeddedScript(sourceName: entry.sourceName, source: entry.source))
+
 proc findEmbeddedModule*(moduleName: string): Option[EmbeddedScript] =
   let fileName =
     if moduleName.endsWith(".sushi"):

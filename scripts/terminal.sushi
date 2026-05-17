@@ -1,9 +1,11 @@
 use io
 
+;;; Escape character used when parsing terminal key sequences.
 var esc [io.char 27]
 var del [io.char 127]
 var backspace [io.char 8]
 
+;;; Structured terminal key event returned by parse-key and read-key.
 class KeyEvent [] do
     field {
         kind ""
@@ -20,10 +22,12 @@ class KeyEvent [] do
     end
 end
 
+;;; Creates a KeyEvent from normalized fields.
 fun event [kind text submit sequence] do
     new KeyEvent kind text submit sequence
 end
 
+;;; Converts a raw terminal key sequence into a KeyEvent.
 fun parse-key [sequence] do
     cond do
         (sequence eq ""): [event "eof" "" F ""]
@@ -43,6 +47,7 @@ fun parse-key [sequence] do
     end
 end
 
+;;; Reads one key sequence from the terminal and returns a parsed KeyEvent.
 fun read-key [] do
     parse-key [io.read-key-sequence]
 end
