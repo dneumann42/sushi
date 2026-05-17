@@ -1,0 +1,16 @@
+use io
+
+var traits {}
+
+fun trait [name blk] do
+    fun method [name args] do
+        set traits.(name) args
+    end
+    replay blk
+end
+
+trait Stringable do
+    method tostring #[]
+end
+
+io.write-line traits

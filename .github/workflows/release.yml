@@ -2,11 +2,8 @@ name: CI/CD
 
 on:
   push:
-    branches:
-      - "**"
     tags:
       - "*"
-  pull_request:
 
 permissions:
   contents: write
