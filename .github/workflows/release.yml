@@ -1,9 +1,12 @@
-name: Release
+name: CI/CD
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "*"
+  pull_request:
 
 permissions:
   contents: write
@@ -16,6 +19,10 @@ jobs:
       - uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: 2.2.8
+      - name: Set package version
+        run: echo "PACKAGE_VERSION=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+      - name: Run tests
+        run: nimble test -y
       - name: Build Linux release artifacts
         run: |
           mkdir -p build/nimcache
@@ -26,48 +33,72 @@ jobs:
           mkdir -p dist/linux
           cp build/sushi dist/linux/
           cp build/libsushi.so dist/linux/
-          tar -C dist/linux -czf sushi-${{ github.ref_name }}-linux-x86_64.tar.gz .
+          tar -C dist/linux -czf sushi-${PACKAGE_VERSION}-linux-x86_64.tar.gz .
       - name: Upload Linux package
         uses: actions/upload-artifact@v4
         with:
           name: sushi-linux-x86_64
-          path: sushi-${{ github.ref_name }}-linux-x86_64.tar.gz
+          path: sushi-${{ env.PACKAGE_VERSION }}-linux-x86_64.tar.gz
           if-no-files-found: error
 
   build-windows:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: 2.2.8
-      - name: Install MinGW
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - name: Set package version
+        shell: pwsh
+        run: |
+          $packageVersion = $env:GITHUB_REF_NAME -replace '/', '-'
+          "PACKAGE_VERSION=$packageVersion" >> $env:GITHUB_ENV
       - name: Build Windows release artifacts
+        shell: pwsh
         run: |
-          mkdir -p build/nimcache
-          nim c -d:release --os:windows --cpu:amd64 --cc:gcc --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc --nimcache:build/nimcache/bin-windows -o:build/sushi.exe src/sushi.nim
-          nim c -d:release --os:windows --cpu:amd64 --cc:gcc --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc --nimcache:build/nimcache/lib-windows --app:lib -o:build/sushi.dll src/sushilib.nim
+          New-Item -ItemType Directory -Force build/nimcache | Out-Null
+          nim c -d:release --nimcache:build/nimcache/bin-windows -o:build/sushi.exe src/sushi.nim
+          nim c -d:release --nimcache:build/nimcache/lib-windows --app:lib -o:build/sushi.dll src/sushilib.nim
       - name: Package Windows artifacts
+        shell: pwsh
         run: |
-          mkdir -p dist/windows
-          cp build/sushi.exe dist/windows/
-          cp build/sushi.dll dist/windows/
-          cd dist/windows
-          zip -r ../../sushi-${{ github.ref_name }}-windows-x86_64.zip .
+          New-Item -ItemType Directory -Force dist/windows | Out-Null
+          Copy-Item build/sushi.exe dist/windows/
+          Copy-Item build/sushi.dll dist/windows/
+          Compress-Archive -Path dist/windows/* -DestinationPath "sushi-$env:PACKAGE_VERSION-windows-x86_64.zip"
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: sushi-windows-x86_64
-          path: sushi-${{ github.ref_name }}-windows-x86_64.zip
+          path: sushi-${{ env.PACKAGE_VERSION }}-windows-x86_64.zip
+          if-no-files-found: error
+
+  build-vsix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Package VS Code extension
+        run: ./editors/vscode/package-vsix.sh
+      - name: Upload VSIX package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sushi-vscode-extension
+          path: editors/vscode/*.vsix
           if-no-files-found: error
 
   release:
+    if: startsWith(github.ref, 'refs/tags/')
     needs:
       - build-linux
       - build-windows
+      - build-vsix
     runs-on: ubuntu-latest
     steps:
+      - name: Set package version
+        run: echo "PACKAGE_VERSION=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
@@ -77,5 +108,6 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: |
-            release-artifacts/sushi-linux-x86_64/sushi-${{ github.ref_name }}-linux-x86_64.tar.gz
-            release-artifacts/sushi-windows-x86_64/sushi-${{ github.ref_name }}-windows-x86_64.zip
+            release-artifacts/sushi-linux-x86_64/sushi-${{ env.PACKAGE_VERSION }}-linux-x86_64.tar.gz
+            release-artifacts/sushi-windows-x86_64/sushi-${{ env.PACKAGE_VERSION }}-windows-x86_64.zip
+            release-artifacts/sushi-vscode-extension/*.vsix

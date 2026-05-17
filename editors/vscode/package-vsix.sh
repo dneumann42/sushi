@@ -4,7 +4,7 @@ set -eu
 cd "$(dirname "$0")"
 
 if command -v npx >/dev/null 2>&1; then
-  npx @vscode/vsce package
+  npx --yes @vscode/vsce package
 elif command -v vsce >/dev/null 2>&1; then
   vsce package
 else
