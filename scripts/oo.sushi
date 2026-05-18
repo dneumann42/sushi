@@ -3,6 +3,14 @@ use io
 var traits {}
 var objects {}
 
+fun implements [o tr] do
+    if o.([raw tr]) do
+        T
+    end do
+        F
+    end
+end
+
 fun trait [name blk] do
     var self {}
 
@@ -28,12 +36,19 @@ trait Stringable do
 end
 
 fun object [name impls blk] do
-    var self {}
-
-    each item [items impls] do
-        var tr traits.(item)
-        tr.init self
+    fun ctor [] do
+        var self {}
+        each item [items impls] do
+            var tr traits.(item)
+            tr.init self
+        end
+        eval self
     end
-
     replay blk 
+    set objects.(name) ctor
+end
+
+fun new [O] do
+    var f objects.(O)
+    eval [f]
 end

@@ -13,6 +13,11 @@ trait Widget do
     fun box [self] do
 
     end
+
+    fun move [self x y] do
+        set self.(name).x x
+        set self.(name).y y
+    end
 end
 
 trait Container do
@@ -23,5 +28,13 @@ trait Container do
     end
 end
 
+trait Interactable do
+    fun init [self] do
+
+    end
+end
+
 object Button [Container Widget Stringable] do
 end
+
+var btn [new Button]
