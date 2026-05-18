@@ -1,16 +1,38 @@
 use io
 
 var traits {}
+var objects {}
 
 fun trait [name blk] do
-    fun method [name args] do
-        set traits.(name) args
+    var self {}
+
+    var native-fun fun
+
+    fun fun [ident args blk] do
+        echo "FUN!"
     end
+
     replay blk
+
+    set traits.(name) self
 end
 
 trait Stringable do
-    method tostring #[]
+    fun tostring [self] do
+        each kv [pairs self] do
+            echo "\(kv.key): \(kv.value)"
+        end
+    end
 end
 
-io.write-line traits
+fun object [name impls blk] do
+    var self {}
+
+    each item [items impls] do
+        var tr traits.(item)
+
+        echo tr
+    end
+
+    replay blk 
+end

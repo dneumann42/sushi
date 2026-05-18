@@ -1,7 +1,7 @@
 import std/[dynlib, net, os, osproc, streams, strutils, tables, unittest]
 import ../src/sushi/diagnostics
 import ../src/sushi/[embed, model, runtime]
-import ../src/sushi/native_modules
+import ../src/sushi/nativeModules
 import ../src/sushi/parser
 
 proc newTestRuntime(): SushiRuntime =
@@ -444,6 +444,67 @@ var t [table a 10 [a] 20]
     check value.kind == Integer
     check value.intValue == 30
 
+  test "prelude pretty prints tables and lists":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+pretty-value { a #[1 { b "two" }] }
+""")
+    check value.kind == Text
+    check value.textValue == "{ a #[1 { b \"two\" }] }"
+
+  test "pairs iterates table key value pairs":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var result ""
+each pair [pairs { a 10 }] do
+  set result "\(pair.key)=\(pair.value)"
+end
+eval result
+""")
+    check value.kind == Text
+    check value.textValue == "a=10"
+
+  test "items iterates list values":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var result ""
+each item [items #["a" "b" "c"]] do
+  set result "\(result)\(item)"
+end
+eval result
+""")
+    check value.kind == Text
+    check value.textValue == "abc"
+
+  test "items preserves raw list values":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+var result ""
+each item [items #[[raw Stringable]]] do
+  set result "\(item)"
+end
+eval result
+""")
+    check value.kind == Text
+    check value.textValue == "Stringable"
+
+  test "items iterates bracketed dsl arguments":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun object [name traits blk] do
+  var result ""
+  each item [items traits] do
+    set result "\(result)\(item);"
+  end
+  eval result
+end
+
+object Button [Container Stringable] do
+end
+""")
+    check value.kind == Text
+    check value.textValue == "Container;Stringable;"
+
   test "supports do-times from the prelude":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -467,6 +528,20 @@ v.y
 """)
     check value.kind == Integer
     check value.intValue == 20
+
+  test "pairs iterates record key value pairs":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+record Point x y
+var point [new Point 4 2]
+var result ""
+each pair [pairs point] do
+  set result "\(result)\(pair.key)=\(pair.value);"
+end
+eval result
+""")
+    check value.kind == Text
+    check value.textValue == "x=4;y=2;"
 
   test "parses spaced operator suffixes on plain symbols":
     let script = parseScript("x += 1\nx = 3", "<test>")

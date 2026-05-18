@@ -6,7 +6,7 @@ when defined(windows):
 else:
   import std/[posix, termios]
 import diagnostics
-import builtin_scripts
+import builtinScripts
 import parser
 import model
 import runtime

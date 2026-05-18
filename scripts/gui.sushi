@@ -1,0 +1,25 @@
+use oo global
+
+trait Widget do
+    fun init [self] do
+        set self.-widget {
+            x 1
+            y 3
+            width 100
+            height 100
+        }
+    end
+
+    fun box [self] do
+
+    end
+end
+
+trait Container do
+    fun init [self] do
+        echo name
+    end
+end
+
+object Button [Container Stringable] do
+end

@@ -1,5 +1,5 @@
 import std/options
-import builtin_scripts
+import builtinScripts
 import diagnostics
 import embed
 import model

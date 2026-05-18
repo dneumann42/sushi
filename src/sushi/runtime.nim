@@ -1,5 +1,5 @@
 import std/[math, options, os, sequtils, strformat, strutils, tables]
-import builtin_scripts
+import builtinScripts
 import diagnostics
 import model
 import parser
@@ -330,6 +330,18 @@ proc evaluateSequenceIndex(sequenceValue, index: Value): Value =
     raise newSushiError("List index " & $index.intValue & " is out of range.")
   sequenceValue.items[index.intValue]
 
+proc readFieldIndex(index: Value; commandName: string): string =
+  case index.kind
+  of Symbol:
+    index.symbolValue
+  of Text:
+    index.textValue
+  else:
+    raise newSushiError(commandName & " expects a symbol or text field name.")
+
+proc evaluateInstanceIndex(instanceValue, index: Value): Value =
+  instanceValue.instanceDef.getField(readFieldIndex(index, "Indexed access on an instance"))
+
 proc evaluateArrayIndex(arrayValue, index: Value): Value =
   if index.kind != Integer:
     raise newSushiError("arrayKind index must be an integer.")
@@ -422,6 +434,8 @@ proc evaluateDotAccess(evaluator: Evaluator; dotAccess: Value; args: seq[Value];
         return evaluateSequenceIndex(receiver, indexValue)
       of Array:
         return evaluateArrayIndex(receiver, indexValue)
+      of Instance:
+        return evaluateInstanceIndex(receiver, indexValue)
       else:
         raise newSushiError("objectSegment " & formatValue(receiver) & " does not support indexing.")
     if accessor.kind != Symbol:
@@ -1414,6 +1428,18 @@ proc tableCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
     i += 2
   newTable(entries)
 
+proc keysCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
+  if args.len != 1:
+    raise newSushiError("Native command 'keys' requires exactly one argument.")
+  let value = evaluator.evaluateQuoted(args[0], env)
+  case value.kind
+  of Table:
+    newSequence(toSeq(value.entries.keys))
+  of Instance:
+    newSequence(value.instanceDef.fields.keys.toSeq.mapIt(newSymbol(it)))
+  else:
+    raise newSushiError("Native command 'keys' expects a table or instance.")
+
 proc arrayCommand(evaluator: Evaluator; env: Env; args: seq[Value]): Value =
   if args.len == 0:
     raise newSushiError("Native command 'array' requires at least one dimension.")
@@ -1560,6 +1586,7 @@ proc bindNativeCommands(env: Env) =
     ("at", atCommand, "at list index", "Returns an item from a list by index."),
     ("list", listCommand, "list values...", "Builds a list from evaluated arguments."),
     ("table", tableCommand, "table key value ...", "Builds a table from key/value pairs."),
+    ("keys", keysCommand, "keys value", "Returns table keys or instance field names as a list."),
     ("append", appendCommand, "append list value", "Appends a value to a list and returns the appended value."),
     ("is-block", isBlockCommand, "is-block value", "Returns true when the raw argument is a block."),
     ("table-values", tableValuesCommand, "table-values table", "Creates an iterator over a table's values."),

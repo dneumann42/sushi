@@ -1,7 +1,7 @@
 import std/os
-import sushi/[diagnostics, embed, model, native_modules, runtime]
+import sushi/[diagnostics, embed, model, nativeModules, runtime]
 
-export diagnostics, embed, model, native_modules, runtime
+export diagnostics, embed, model, nativeModules, runtime
 
 type
   SushiRuntimeHandle = object

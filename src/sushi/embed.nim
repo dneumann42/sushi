@@ -1,5 +1,5 @@
 import diagnostics
-import native_modules
+import nativeModules
 import runtime
 
 proc newEmbeddedRuntime*(args: seq[string] = @[]): SushiRuntime =

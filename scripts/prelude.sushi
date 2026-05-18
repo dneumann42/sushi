@@ -2,13 +2,146 @@ use syntax
 
 ;;; Writes a value followed by a newline.
 fun echo [str] do
-    write-line str
+    write-line [pretty-value str]
+end
+
+fun pretty-value [value] do
+    pretty-node [syntax.serialize value]
+end
+
+fun pretty-node-list [nodes index] do
+    if (index eq [length nodes]) do
+        ""
+    end do
+        var current [pretty-node nodes.(index)]
+        if ((index + 1) eq [length nodes]) do
+            eval current
+        end do
+            "\(current) \(pretty-node-list nodes (index + 1))"
+        end
+    end
+end
+
+fun pretty-entry-list [entries index] do
+    if (index eq [length entries]) do
+        ""
+    end do
+        var entry entries.(index)
+        var current "\(pretty-node [syntax.field entry "key"]) \(pretty-node [syntax.field entry "value"])"
+        if ((index + 1) eq [length entries]) do
+            eval current
+        end do
+            "\(current) \(pretty-entry-list entries (index + 1))"
+        end
+    end
+end
+
+fun pretty-sequence-node [node] do
+    var items [syntax.field node "items"]
+    if ([length items] eq 0) do
+        "#[]"
+    end do
+        "#[\(pretty-node-list items 0)]"
+    end
+end
+
+fun pretty-table-node [node] do
+    var entries [syntax.field node "entries"]
+    if ([length entries] eq 0) do
+        "{}"
+    end do
+        "{ \(pretty-entry-list entries 0) }"
+    end
+end
+
+fun pretty-node [node] do
+    catch do
+        var kind [syntax.field node "kind"]
+        cond do
+            (kind eq "sequence"): [pretty-sequence-node node]
+            (kind eq "table"): [pretty-table-node node]
+            T: [syntax.field node "render"]
+        end
+    end do
+        ""
+    end
 end
 
 ;;; Iterates over values produced by an iterator callable.
 ;;; The current item is bound to the requested name while the body runs.
 fun each [item iterator body] do
     iterate item iterator body
+end
+
+;;; Creates an iterator over key/value pair tables from a table or record.
+;;; Each yielded pair has `key` and `value` fields.
+fun pairs [source] do
+    var pair-keys [keys source]
+    var index 0
+
+    fun next do
+        if (index eq [length pair-keys]) do
+            :done
+        end do
+            var pair-key pair-keys.(index)
+            var pair-value source.(pair-key)
+            var item {}
+            set item.([raw key]) [eval pair-key]
+            set item.([raw value]) [eval pair-value]
+            set index (index + 1)
+            eval-value item
+        end
+    end
+
+    eval next
+end
+
+;;; Creates an iterator over values in a list.
+fun items [source] do
+    var sequence-items [catch do
+        length source
+    end do
+        -1
+    end]
+    var command-items [catch do
+        object-count source
+    end do
+        -1
+    end]
+    var index 0
+
+    fun next do
+        cond do
+            (sequence-items > -1): do
+                if (index eq sequence-items) do
+                    :done
+                end do
+                    var item source.(index)
+                    set index (index + 1)
+                    eval-value item
+                end
+            end
+            (command-items > -1): do
+                if (index eq command-items) do
+                    :done
+                end do
+                    var item [object-at source index]
+                    set index (index + 1)
+                    eval-value item
+                end
+            end
+            T: do
+                if (index eq 1) do
+                    :done
+                end do
+                    set index 1
+                    eval-value source
+                end
+            end
+        end
+    end
+
+    eval next
 end
 
 ;;; Iterates from start to stop, inclusive.
