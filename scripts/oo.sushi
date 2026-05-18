@@ -6,10 +6,9 @@ var objects {}
 fun trait [name blk] do
     var self {}
 
-    var native-fun fun
-
-    fun fun [ident args blk] do
-        echo "FUN!"
+    fun fun args do
+        var ident [eval-value args.(0)]
+        set self.(ident) [make-fn args.(1) args.(2)]
     end
 
     replay blk
@@ -18,6 +17,9 @@ fun trait [name blk] do
 end
 
 trait Stringable do
+    fun init [self] do
+    end
+
     fun tostring [self] do
         each kv [pairs self] do
             echo "\(kv.key): \(kv.value)"
@@ -30,8 +32,7 @@ fun object [name impls blk] do
 
     each item [items impls] do
         var tr traits.(item)
-
-        echo tr
+        tr.init self
     end
 
     replay blk 

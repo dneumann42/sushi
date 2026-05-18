@@ -2,7 +2,7 @@ use oo global
 
 trait Widget do
     fun init [self] do
-        set self.-widget {
+        set self.(name) {
             x 1
             y 3
             width 100
@@ -17,9 +17,11 @@ end
 
 trait Container do
     fun init [self] do
-        echo name
+        set self.(name) {
+            children #[]
+        }
     end
 end
 
-object Button [Container Stringable] do
+object Button [Container Widget Stringable] do
 end

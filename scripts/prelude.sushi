@@ -67,6 +67,46 @@ fun pretty-node [node] do
     end
 end
 
+;;; Converts raw Sushi syntax or a value into a syntax node.
+fun node [value] do
+    syntax.serialize [raw value]
+end
+
+;;; Builds a symbol syntax node from text.
+fun sym [name] do
+    syntax.symbol name
+end
+
+;;; Builds a command syntax node from syntax node objects.
+fun cmd [objects] do
+    syntax.command objects
+end
+
+;;; Builds a block syntax node from command syntax nodes.
+fun block [commands] do
+    syntax.block commands
+end
+
+;;; Evaluates a syntax node in the current scope.
+fun eval-node [node] do
+    syntax.eval-node node
+end
+
+;;; Builds an anonymous function syntax node.
+fun fn-node [args body] do
+    cmd [list [sym "fn"] [node args] [node body]]
+end
+
+;;; Builds and evaluates an anonymous function from raw args and body syntax.
+fun make-fn args do
+    var fn-args [eval-value args.(0)]
+    var fn-body [eval-value args.(1)]
+    syntax.eval-node [cmd [list \
+        [sym "fn"] \
+        [syntax.serialize [raw fn-args]] \
+        [syntax.serialize [raw fn-body]]]] args.(1)
+end
+
 ;;; Iterates over values produced by an iterator callable.
 ;;; The current item is bound to the requested name while the body runs.
 fun each [item iterator body] do

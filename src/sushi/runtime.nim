@@ -77,6 +77,7 @@ proc createReplayScope*(env, callerScope: Env): Env =
     else:
       initEnv(callerScope, baseEnv.fallback, state, callerScope.currentModule, false)
   result = initEnv(baseEnv, fallbackEnv, state, moduleValue, false)
+  result.commandScope = callerScope
 
 proc getModuleGlobalScope*(env: Env): Env =
   var last = env
@@ -119,6 +120,21 @@ proc find*(env: Env; name: Value): Value =
   if resolved.isNone:
     raise newSushiError("Name " & formatValue(name) & " not found in environment.")
   resolved.get
+
+proc findCommandHead(env: Env; name: Value): Value =
+  if not env.commandScope.isNil:
+    var visited: seq[Env]
+    let commandScoped = tryFind(env.commandScope, name.keyName, visited)
+    if commandScoped.isSome:
+      return commandScoped.get
+  env.find(name)
+
+proc hasCommandHead(env: Env; name: Value): bool =
+  if not env.commandScope.isNil:
+    var visited: seq[Env]
+    if tryFind(env.commandScope, name.keyName, visited).isSome:
+      return true
+  env.has(name)
 
 proc setValue*(env: Env; name, value: Value) =
   let key = name.keyName
@@ -427,24 +443,28 @@ proc evaluateDotAccess(evaluator: Evaluator; dotAccess: Value; args: seq[Value];
   try:
     if accessor.isDotIndexMarker:
       let indexValue = evaluator.evaluateQuoted(accessor.objects[1], env)
-      case receiver.kind
+      let indexed = case receiver.kind
       of Table:
-        return evaluateTableIndex(receiver, indexValue)
+        evaluateTableIndex(receiver, indexValue)
       of Sequence:
-        return evaluateSequenceIndex(receiver, indexValue)
+        evaluateSequenceIndex(receiver, indexValue)
       of Array:
-        return evaluateArrayIndex(receiver, indexValue)
+        evaluateArrayIndex(receiver, indexValue)
       of Instance:
-        return evaluateInstanceIndex(receiver, indexValue)
+        evaluateInstanceIndex(receiver, indexValue)
       else:
         raise newSushiError("objectSegment " & formatValue(receiver) & " does not support indexing.")
+      if args.len == 0:
+        return indexed
+      return invokeValue(indexed, evaluator, env, args)
     if accessor.kind != Symbol:
       raise newSushiError("Dot access expects a member name or grouped index.")
     case receiver.kind
     of Table:
-      if args.len != 0:
-        raise newSushiError("tableKind values are not invokable.")
-      return evaluateTableIndex(receiver, accessor)
+      let member = evaluateTableIndex(receiver, accessor)
+      if args.len == 0:
+        return member
+      return invokeValue(member, evaluator, env, args)
     of Module:
       let exported = receiver.getExport(accessor.symbolValue)
       if args.len == 0 and not exported.isCallable:
@@ -532,6 +552,10 @@ proc isLambdaLiteral(value: Value): bool =
   value.kind == Command and value.objects.len == 3 and
     value.objects[0].kind == Symbol and value.objects[0].symbolValue == "fn"
 
+proc isBracketCommandLiteral(value: Value): bool =
+  value.kind == Command and not value.span.isEmpty and value.span.start < value.span.file.text.len and
+    value.span.file.text[value.span.start] == '['
+
 proc evaluate*(evaluator: Evaluator; value: Value; env: Env): Value =
   try:
     case value.kind
@@ -548,11 +572,13 @@ proc evaluate*(evaluator: Evaluator; value: Value; env: Env): Value =
             return evaluator.evaluate(head, env)
           if head.isDotAccessCommand:
             return evaluator.evaluateDotAccess(head, @[], env)
+          if head.isBracketCommandLiteral:
+            return evaluator.evaluate(head, env)
         of StringTemplate:
           return evaluator.evaluateQuoted(head, env)
         of Symbol:
-          if env.has(head):
-            let found = env.find(head)
+          if env.hasCommandHead(head):
+            let found = env.findCommandHead(head)
             if found.isCallable:
               return invokeValue(found, evaluator, env, @[])
         else:
@@ -563,9 +589,9 @@ proc evaluate*(evaluator: Evaluator; value: Value; env: Env): Value =
         return evaluator.evaluateDotAccess(value.objects[0], args, env)
       if value.objects[0].kind != Symbol:
         raise newSushiError("commandKind head must be a symbol, got " & formatValue(value.objects[0]) & ".")
-      if not env.has(value.objects[0]):
+      if not env.hasCommandHead(value.objects[0]):
         raise newSushiError("Unknown command: " & formatValue(value.objects[0]))
-      let callable = env.find(value.objects[0])
+      let callable = env.findCommandHead(value.objects[0])
       invokeValue(callable, evaluator, env, args)
     else:
       value

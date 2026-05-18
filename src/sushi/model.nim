@@ -136,7 +136,7 @@ type
     rootEnv*: Env
 
   Env* = ref object
-    parent*, fallback*: Env
+    parent*, fallback*, commandScope*: Env
     bindings*: OrderedTable[string, Value]
     runtimeState*: RuntimeState
     currentModule*: Value

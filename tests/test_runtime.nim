@@ -505,6 +505,57 @@ end
     check value.kind == Text
     check value.textValue == "Container;Stringable;"
 
+  test "prelude builds functions from raw syntax nodes":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun collect [blk] do
+  var f F
+  fun fun args do
+    set f [make-fn args.(1) args.(2)]
+  end
+  replay blk
+  f 41
+end
+
+collect do
+  fun built [x] do
+    + x 1
+  end
+end
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
+  test "prelude built functions keep the caller scope":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun collect [blk] do
+  var label "Container"
+  var f F
+  fun fun args do
+    set f [make-fn args.(1) args.(2)]
+  end
+  replay blk
+  f
+end
+
+collect do
+  fun built [] do
+    eval label
+  end
+end
+""")
+    check value.kind == Text
+    check value.textValue == "Container"
+
+  test "prelude builds and evaluates command syntax nodes":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+eval-node [cmd [list [sym "+"] [node 20] [node 22]]]
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
   test "supports do-times from the prelude":
     let runtime = newTestRuntime()
     let value = runtime.evaluate("""
@@ -809,6 +860,43 @@ v.y.z
     check value.kind == Integer
     check value.intValue == 30
 
+  test "invokes callable table members through dot syntax":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun init [value] do
+  eval ([eval value] + 1)
+end
+var calls { init init }
+calls.init 41
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
+  test "invokes callable table members through bracket command syntax":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun init [value] do
+  eval ([eval value] + 1)
+end
+var calls { init init }
+[calls.init 41]
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
+  test "invokes callable table members through grouped dot index syntax":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun init [value] do
+  eval ([eval value] + 1)
+end
+var method "init"
+var calls [table [method] init]
+calls.(method) 41
+""")
+    check value.kind == Integer
+    check value.intValue == 42
+
   test "loads the embedded prelude without scripts on disk":
     let tempDir = getTempDir() / "sushi-embedded-prelude-test"
     createDir(tempDir)
@@ -866,6 +954,43 @@ end
 """)
     check value.kind == Integer
     check value.intValue == 2
+
+  test "replay lets command scope shadow captured scope":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun collect-functions [blk] do
+  var result ""
+  fun fun [name args body] do
+    set result "\(result)\(name);"
+  end
+  replay blk
+  eval result
+end
+
+collect-functions do
+  fun alpha [] do
+  end
+  fun beta [] do
+  end
+end
+""")
+    check value.kind == Text
+    check value.textValue == "alpha;beta;"
+
+  test "replay preserves captured variables after command scope lookup":
+    let runtime = newTestRuntime()
+    let value = runtime.evaluate("""
+fun run-block [blk] do
+  replay blk
+end
+
+var outer 42
+run-block do
+  eval outer
+end
+""")
+    check value.kind == Integer
+    check value.intValue == 42
 
   test "supports implicit blocks at runtime":
     let runtime = newTestRuntime()
